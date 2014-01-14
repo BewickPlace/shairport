@@ -387,39 +387,48 @@ static void handle_flush(rtsp_conn_info *conn,
 
 static void handle_setup(rtsp_conn_info *conn,
                          rtsp_message *req, rtsp_message *resp) {
-    int cport, tport;
+    int *cport;
+    int *tport;
     char *hdr = msg_get_header(req, "Transport");
     if (!hdr)
         return;
+    debug(1, "Transport:%s\n", hdr);
 
     char *p;
+    cport = malloc(sizeof(cport));
+    tport = malloc(sizeof(tport));
     p = strstr(hdr, "control_port=");
     if (!p)
-        return;
+        goto cleanup_handle_setup;
     p = strchr(p, '=') + 1;
-    cport = atoi(p);
+    *cport = atoi(p);
 
     p = strstr(hdr, "timing_port=");
     if (!p)
-        return;
+        goto cleanup_handle_setup;
     p = strchr(p, '=') + 1;
-    tport = atoi(p);
+    *tport = atoi(p);
 
     rtsp_take_player();
     int sport = rtp_setup(&conn->remote, cport, tport);
     if (!sport)
-        return;
+        goto cleanup_handle_setup;
+    debug(1,"starting player_play\n");
 
     player_play(&conn->stream);
 
-    char *resphdr = malloc(strlen(hdr) + 20);
-    strcpy(resphdr, hdr);
-    sprintf(resphdr + strlen(resphdr), ";server_port=%d", sport);
+    char *resphdr = malloc(strlen(hdr) + 40);
+    sprintf(resphdr, "%s;server_port=%d;control_port=%d;timing_port=%d",
+            "RTP/AVP/UDP;unicast;interleaved=0-1;mode=record", sport, *cport, *tport);
+
     msg_add_header(resp, "Transport", resphdr);
 
     msg_add_header(resp, "Session", "1");
 
     resp->respcode = 200;
+cleanup_handle_setup:
+    free(cport);
+    free(tport);
 }
 
 static void handle_ignore(rtsp_conn_info *conn,
