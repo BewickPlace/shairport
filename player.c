@@ -78,8 +78,15 @@ static pthread_mutex_t vol_mutex = PTHREAD_MUTEX_INITIALIZER;
 #define BUFFER_FRAMES  512
 #define MAX_PACKET      2048
 
+//player states
+#define BUFFERING 0
+#define SYNCING   1
+#define PLAYING   2
+
+
 typedef struct audio_buffer_entry {   // decoded audio packets
     int ready;
+    sync_cfg sync;
     signed short *data;
 } abuf_t;
 static abuf_t audio_buffer[BUFFER_FRAMES];
@@ -188,7 +195,11 @@ static void free_buffer(void) {
         free(audio_buffer[i].data);
 }
 
-void player_put_packet(seq_t seqno, uint8_t *data, int len) {
+static long us_to_frames(long long us) {
+    return us * sampling_rate / 1000000;
+}
+
+void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
     abuf_t *abuf = 0;
     int16_t buf_fill;
 
@@ -217,6 +228,9 @@ void player_put_packet(seq_t seqno, uint8_t *data, int len) {
     if (abuf) {
         alac_decode(abuf->data, data, len);
         abuf->ready = 1;
+        abuf->sync.rtp_tsp = sync_tag.rtp_tsp;
+        abuf->sync.ntp_tsp = sync_tag.ntp_tsp;
+        abuf->sync.sync_mode = sync_tag.sync_mode;
     }
 
     pthread_mutex_lock(&ab_mutex);
@@ -339,7 +353,7 @@ static void bf_est_update(short fill) {
 }
 
 // get the next frame, when available. return 0 if underrun/stream reset.
-static short *buffer_get_frame(void) {
+static short *buffer_get_frame(sync_cfg *sync_tag) {
     int16_t buf_fill;
     seq_t read, next;
     abuf_t *abuf = 0;
@@ -364,8 +378,9 @@ static short *buffer_get_frame(void) {
     }
     read = ab_read;
     ab_read++;
-    buf_fill = seq_diff(ab_read, ab_write);
-    bf_est_update(buf_fill);
+    //buf_fill = seq_diff(ab_read, ab_write);
+    //bf_est_update(buf_fill);
+
 
     // check if t+16, t+32, t+64, t+128, ... (buffer_start_fill / 2)
     // packets have arrived... last-chance resend
@@ -385,6 +400,9 @@ static short *buffer_get_frame(void) {
         memset(curframe->data, 0, FRAME_BYTES(frame_size));
     }
     curframe->ready = 0;
+    sync_tag->rtp_tsp = curframe->sync.rtp_tsp;
+    sync_tag->ntp_tsp = curframe->sync.ntp_tsp;
+    sync_tag->sync_mode = curframe->sync.sync_mode;
     pthread_mutex_unlock(&ab_mutex);
 
     return curframe->data;
@@ -429,11 +447,26 @@ static int stuff_buffer(double playback_rate, short *inptr, short *outptr) {
     return frame_size + stuff;
 }
 
+static inline long long get_sync_time(long long ntp_tsp) {
+    long long sync_time_est;
+    sync_time_est = (ntp_tsp + config.delay) - (tstp_us() + get_ntp_offset() + config.output->get_delay());
+    return sync_time_est;
+}
+
+//constant first-order filter
+#define ALPHA 0.945
+#define LOSS 850000
+
 static void *player_thread_func(void *arg) {
     int play_samples;
+    sync_cfg sync_tag;
+    long long sync_time;
+    double sync_time_diff;
+    long sync_frames;
+    int state = BUFFERING;
 
-    signed short *inbuf, *outbuf, *silence;
-    outbuf = malloc(OUTFRAME_BYTES(frame_size));
+    signed short *inbuf, *outbuf, *resbuf, *silence;
+    resbuf = malloc(OUTFRAME_BYTES(frame_size));
     silence = malloc(OUTFRAME_BYTES(frame_size));
     memset(silence, 0, OUTFRAME_BYTES(frame_size));
 
@@ -452,30 +485,89 @@ static void *player_thread_func(void *arg) {
         srcdat.end_of_input = 0;
     }
 #endif
-
+    debug(1,"Player STATE: %d\n", state);
     while (!please_stop) {
-        inbuf = buffer_get_frame();
-        if (!inbuf)
-            inbuf = silence;
-
-#ifdef FANCY_RESAMPLING
-        if (fancy_resampling) {
-            int i;
-            pthread_mutex_lock(&vol_mutex);
-            for (i=0; i<2*FRAME_BYTES(frame_size); i++) {
-                frame[i] = (float)inbuf[i] / 32768.0;
-                frame[i] *= volume;
+        switch (state) {
+        case BUFFERING: {
+            int sleep_time;
+            inbuf = buffer_get_frame(&sync_tag);
+            if (inbuf) {
+                if (sync_tag.sync_mode != NOSYNC) {
+                    // figure out how much silence to insert before playback starts
+                    sync_frames = us_to_frames(get_sync_time(sync_tag.ntp_tsp));
+                } else {
+                    // what if first packet(s) is lost?
+                    warn("Ouch! first packet has no sync...\n");
+                    sync_frames = us_to_frames(config.delay) - config.output->get_delay();
+                }
+                if (sync_frames < 0)
+                    sync_frames = 0;
+                debug(1, "Fill with %ld frames and %ld samples\n", sync_frames / frame_size , sync_frames % frame_size);
+                state = SYNCING;
+                debug(1,"Changing player STATE: %d\n", state);
             }
-            pthread_mutex_unlock(&vol_mutex);
-            srcdat.src_ratio = bf_playback_rate;
-            src_process(src, &srcdat);
-            assert(srcdat.input_frames_used == FRAME_BYTES(frame_size));
-            src_float_to_short_array(outframe, outbuf, FRAME_BYTES(frame_size)*2);
-            play_samples = srcdat.output_frames_gen;
-        } else
+            outbuf = silence;
+            play_samples = frame_size;
+            break;
+        }
+        case SYNCING: {
+            if (sync_frames > 0) {
+                if (((sync_frames < frame_size * 50) && (sync_frames >= frame_size * 49)) && \
+                        (sync_tag.sync_mode != NOSYNC)) {
+                    debug(3,"sync_frames adjusting: %d->", sync_frames);
+                    // figure out how much silence to insert before playback starts
+                    sync_frames = us_to_frames(get_sync_time(sync_tag.ntp_tsp));
+                    if (sync_frames < 0)
+                        sync_frames = 0;
+                    debug(3,"%d\n", sync_frames);
+                }
+                play_samples = (sync_frames >= frame_size ? frame_size : sync_frames);
+                outbuf = silence;
+                sync_frames -= play_samples;
+
+                debug(3,"Samples to go before playback start: %d\n", sync_frames);
+            } else {
+                outbuf = resbuf;
+                play_samples = stuff_buffer(bf_playback_rate, inbuf, outbuf);
+                state = PLAYING;
+                debug(1,"Changing player STATE: %d\n", state);
+            }
+            break;
+        }
+        case PLAYING: {
+            inbuf = buffer_get_frame(&sync_tag);
+            if (!inbuf)
+                inbuf = silence;
+#ifdef FANCY_RESAMPLING
+            if (fancy_resampling) {
+                int i;
+                pthread_mutex_lock(&vol_mutex);
+                for (i=0; i<2*FRAME_BYTES(frame_size); i++) {
+                    frame[i] = (float)inbuf[i] / 32768.0;
+                    frame[i] *= volume;
+                }
+                pthread_mutex_unlock(&vol_mutex);
+                srcdat.src_ratio = bf_playback_rate;
+                src_process(src, &srcdat);
+                assert(srcdat.input_frames_used == FRAME_BYTES(frame_size));
+                src_float_to_short_array(outframe, outbuf, FRAME_BYTES(frame_size)*2);
+                play_samples = srcdat.output_frames_gen;
+            } else
 #endif
             play_samples = stuff_buffer(bf_playback_rate, inbuf, outbuf);
-
+            if (sync_tag.sync_mode == NTPSYNC) {
+                //check if we're still in sync.
+                sync_time = get_sync_time(sync_tag.ntp_tsp);
+                sync_time_diff = (ALPHA * sync_time_diff) + (1 - ALPHA) * (double)sync_time;
+                debug(2, "Sync'ed diff sync_time %lld\n", sync_time);
+                bf_playback_rate = 1 - (sync_time_diff / LOSS);
+                debug(2, "bf_playback_rate %f, sync_time %lld\n", bf_playback_rate, sync_time);
+            }
+            break;
+        }
+        default:
+            break;
+        }
         config.output->play(outbuf, play_samples);
     }
 

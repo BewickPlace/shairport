@@ -254,7 +254,8 @@ int main(int argc, char **argv) {
     memset(&config, 0, sizeof(config));
 
     // set defaults
-    config.buffer_start_fill = 220;
+    config.buffer_start_fill = 20;
+    config.delay = 1000000; //todo: check with an airport express what this should be
     config.port = 5002;
     char hostname[100];
     gethostname(hostname, 100);

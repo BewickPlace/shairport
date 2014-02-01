@@ -1,7 +1,18 @@
 #ifndef _PLAYER_H
 #define _PLAYER_H
 
+#include <limits.h>
 #include "audio.h"
+
+#define NOSYNC 0
+#define NTPSYNC 1
+#define RTPSYNC 2
+
+typedef struct {
+    long long ntp_tsp;
+    unsigned long rtp_tsp;
+    int sync_mode;
+} sync_cfg;
 
 typedef struct {
     uint8_t aesiv[16], aeskey[16];
@@ -23,6 +34,6 @@ void player_volume(double f);
 void player_flush(void);
 void player_resync(void);
 
-void player_put_packet(seq_t seqno, uint8_t *data, int len);
+void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len);
 
 #endif //_PLAYER_H
