@@ -80,5 +80,6 @@ audio_output audio_sndio = {
 	.start = &start,
 	.stop = &stop,
 	.play = &play,
-	.volume = &volume
+	.volume = &volume,
+    .get_delay = NULL
 };
