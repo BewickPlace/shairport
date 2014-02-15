@@ -413,6 +413,7 @@ static void handle_setup(rtsp_conn_info *conn,
     int sport = rtp_setup(&conn->remote, cport, tport);
     if (!sport)
         goto cleanup_handle_setup;
+    debug(1,"starting player_play\n");
 
     player_play(&conn->stream);
 

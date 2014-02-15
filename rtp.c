@@ -121,12 +121,11 @@ long long tstp_us() {
     return tspk_to_us(tv);
 }
 
-static long long ntp_tsp_to_us(unsigned long timestamp_hi, unsigned long timestamp_lo) {
+static long long ntp_tsp_to_us(uint32_t timestamp_hi, uint32_t timestamp_lo) {
     long long timetemp;
 
-    timetemp = timestamp_hi * 1000000;
-    long long fraction = (long long)(timestamp_lo & 0xFFFFFFFF);
-    timetemp += (timestamp_lo * 1000000) >> 32;
+    timetemp = (long long)timestamp_hi * 1000000LL;
+    timetemp += ((long long)timestamp_lo * 1000000LL) >> 32;
 
     return timetemp;
 }
@@ -153,9 +152,9 @@ static void *rtp_receiver(void *arg) {
                 continue;
             }
 
-            rtp_tsp_sync = ntohl(*(unsigned long *)(packet+16));
+            rtp_tsp_sync = ntohl(*(uint32_t *)(packet+16));
             debug(2, "Sync packet rtp_tsp %lu\n", rtp_tsp_sync);
-            ntp_tsp_sync = ntp_tsp_to_us(ntohl(*(unsigned long *)(packet+8)), ntohl(*(unsigned long *)(packet+12)));
+            ntp_tsp_sync = ntp_tsp_to_us(ntohl(*(uint32_t *)(packet+8)), ntohl(*(uint32_t *)(packet+12)));
             debug(2, "Sync packet ntp_tsp %lld\n", ntp_tsp_sync);
             continue;
         }
@@ -166,8 +165,8 @@ static void *rtp_receiver(void *arg) {
                 plen -= 4;
             }
 
-            seq_t seqno = ntohs(*(unsigned short *)(pktp+2));
-            unsigned long rtp_tsp = ntohl(*(unsigned long *)(pktp+4));
+            seq_t seqno = ntohs(*(uint16_t *)(pktp+2));
+            unsigned long rtp_tsp = ntohl(*(uint32_t *)(pktp+4));
 
             pktp += 12;
             plen -= 12;
@@ -226,11 +225,11 @@ static void *ntp_receiver(void *arg) {
                 warn("Timing packet with wrong length %d received\n", plen);
                 continue;
             }
-            long long ntp_ref_tsp = ntp_tsp_to_us(ntohl(*(unsigned long *)(packet+8)), ntohl(*(unsigned long *)(packet+12)));
+            long long ntp_ref_tsp = ntp_tsp_to_us(ntohl(*(uint32_t *)(packet+8)), ntohl(*(uint32_t *)(packet+12)));
             debug(2, "Timing packet ntp_ref_tsp %lld\n", ntp_ref_tsp);
-            long long ntp_rec_tsp = ntp_tsp_to_us(ntohl(*(unsigned long *)(packet+16)), ntohl(*(unsigned long *)(packet+20)));
+            long long ntp_rec_tsp = ntp_tsp_to_us(ntohl(*(uint32_t *)(packet+16)), ntohl(*(uint32_t *)(packet+20)));
             debug(2, "Timing packet ntp_rec_tsp %lld\n", ntp_rec_tsp);
-            long long ntp_sen_tsp = ntp_tsp_to_us(ntohl(*(unsigned long *)(packet+24)), ntohl(*(unsigned long *)(packet+28)));
+            long long ntp_sen_tsp = ntp_tsp_to_us(ntohl(*(uint32_t *)(packet+24)), ntohl(*(uint32_t *)(packet+28)));
             debug(2, "Timing packet ntp_sen_tsp %lld\n", ntp_sen_tsp);
             long long ntp_loc_tsp = tspk_to_us(tv);
             debug(2, "Timing packet ntp_loc_tsp %lld\n", ntp_loc_tsp);
@@ -263,11 +262,11 @@ static void send_timing_packet(int max_delay_time_ms) {
     // todo: randomize time at which to send timing packets to avoid timing floods at the client
     req[0] = 0x80;
     req[1] = 0x52|0x80;  // Apple 'ntp request'
-    *(unsigned short *)(req+2) = htons(7);  // seq no, needs to be 7 or iTunes won't respond
+    *(uint16_t *)(req+2) = htons(7);  // seq no, needs to be 7 or iTunes won't respond
 
     clock_gettime(CLOCK_MONOTONIC, &tv);
-    *(unsigned long *)(req+24) = htonl(tv.tv_sec);
-    *(unsigned long *)(req+28) = htonl((unsigned long)tv.tv_nsec * 0x100000000 / (1000 * 1000 * 1000));
+    *(uint32_t *)(req+24) = htonl((uint32_t)tv.tv_sec);
+    *(uint32_t *)(req+28) = htonl((uint32_t)tv.tv_nsec * 0x100000000 / (1000 * 1000 * 1000));
 
     sendto(timing_sock, req, sizeof(req), 0, (struct sockaddr*)&rtp_timing, sizeof(rtp_timing));
     debug(1, "Current time s:%lu us:%lu\n", (unsigned int) tv.tv_sec, (unsigned int) tv.tv_nsec / 1000);
