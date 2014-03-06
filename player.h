@@ -31,7 +31,7 @@ int player_play(stream_cfg *cfg);
 void player_stop(void);
 
 void player_volume(double f);
-void player_flush(void);
+unsigned long player_flush(int seqno, unsigned long rtp_tsp);
 void player_resync(void);
 
 void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len);

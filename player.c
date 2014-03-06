@@ -82,7 +82,12 @@ static pthread_mutex_t vol_mutex = PTHREAD_MUTEX_INITIALIZER;
 #define BUFFERING 0
 #define SYNCING   1
 #define PLAYING   2
+int state;
 
+//buffer states
+#define SIGNALLOSS 0
+#define UNSYNC 1
+#define INSYNC 2
 
 typedef struct audio_buffer_entry {   // decoded audio packets
     int ready;
@@ -204,12 +209,13 @@ void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
     int16_t buf_fill;
 
     pthread_mutex_lock(&ab_mutex);
-    if (!ab_synced) {
-        debug(2, "syncing to first seqno %04X\n", seqno);
+    if (ab_synced == SIGNALLOSS) {
+        debug(2, "picking up first seqno %04X\n", seqno);
         ab_write = seqno-1;
         ab_read = seqno;
-        ab_synced = 1;
+        ab_synced = UNSYNC;
     }
+    debug(3, "packet: ab_write %04X, ab_read %04X, seqno %04X\n", ab_write, ab_read, seqno);
     if (seq_diff(ab_write, seqno) == 1) {                  // expected packet
         abuf = audio_buffer + BUFIDX(seqno);
         ab_write = seqno;
@@ -217,27 +223,26 @@ void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
         rtp_request_resend(ab_write+1, seqno-1);
         abuf = audio_buffer + BUFIDX(seqno);
         ab_write = seqno;
-    } else if (seq_order(ab_read, seqno)) {     // late but not yet played
+    } else if (seq_order(ab_read - 1, seqno)) {     // late but not yet played
         abuf = audio_buffer + BUFIDX(seqno);
     } else {    // too late.
-        debug(1, "late packet %04X (%04X:%04X)", seqno, ab_read, ab_write);
+        debug(1, "late packet %04X (%04X:%04X)\n", seqno, ab_read, ab_write);
     }
     buf_fill = seq_diff(ab_read, ab_write);
     pthread_mutex_unlock(&ab_mutex);
 
     if (abuf) {
         alac_decode(abuf->data, data, len);
-        abuf->ready = 1;
         abuf->sync.rtp_tsp = sync_tag.rtp_tsp;
         abuf->sync.ntp_tsp = sync_tag.ntp_tsp;
         abuf->sync.sync_mode = sync_tag.sync_mode;
+        abuf->ready = 1;
     }
 
     pthread_mutex_lock(&ab_mutex);
     if (ab_buffering && buf_fill >= config.buffer_start_fill) {
         debug(1, "buffering over. starting play\n");
         ab_buffering = 0;
-        bf_est_reset(buf_fill);
     }
     pthread_mutex_unlock(&ab_mutex);
 }
@@ -359,22 +364,29 @@ static short *buffer_get_frame(sync_cfg *sync_tag) {
     abuf_t *abuf = 0;
     int i;
 
+    sync_tag->sync_mode = NOSYNC;
+
     if (ab_buffering)
         return 0;
 
     pthread_mutex_lock(&ab_mutex);
 
     buf_fill = seq_diff(ab_read, ab_write);
-    if (buf_fill < 1 || !ab_synced) {
+    if (buf_fill < 1) {
         if (buf_fill < 1)
             warn("underrun.");
         ab_buffering = 1;
+        ab_synced = SIGNALLOSS;
         pthread_mutex_unlock(&ab_mutex);
         return 0;
     }
     if (buf_fill >= BUFFER_FRAMES) {   // overrunning! uh-oh. restart at a sane distance
         warn("overrun.");
         ab_read = ab_write - config.buffer_start_fill;
+    }
+    if (ab_synced == UNSYNC && buf_fill < config.buffer_start_fill) {
+        pthread_mutex_unlock(&ab_mutex);
+        return 0;
     }
     read = ab_read;
     ab_read++;
@@ -398,6 +410,14 @@ static short *buffer_get_frame(sync_cfg *sync_tag) {
     if (!curframe->ready) {
         debug(1, "missing frame %04X.", read);
         memset(curframe->data, 0, FRAME_BYTES(frame_size));
+    }
+    if (ab_synced == UNSYNC && (curframe->sync.sync_mode == NTPSYNC)) {
+        debug(1, "Timestamped frame found, resuming playback\n");
+        ab_read--;
+        ab_synced = INSYNC;
+        state = BUFFERING;
+        pthread_mutex_unlock(&ab_mutex);
+        return 0;
     }
     curframe->ready = 0;
     sync_tag->rtp_tsp = curframe->sync.rtp_tsp;
@@ -463,7 +483,7 @@ static void *player_thread_func(void *arg) {
     long long sync_time;
     double sync_time_diff;
     long sync_frames;
-    int state = BUFFERING;
+    state = BUFFERING;
 
     signed short *inbuf, *outbuf, *resbuf, *silence;
     resbuf = malloc(OUTFRAME_BYTES(frame_size));
@@ -587,10 +607,22 @@ void player_volume(double f) {
         pthread_mutex_unlock(&vol_mutex);
     }
 }
-void player_flush(void) {
+
+unsigned long player_flush(int seqno, unsigned long rtp_tsp) {
+    unsigned long result = 0;
     pthread_mutex_lock(&ab_mutex);
+    abuf_t *curframe = audio_buffer + BUFIDX(ab_read);
+    if (curframe->ready) {
+        result = curframe->sync.rtp_tsp;
+    }
+
     ab_resync();
+    ab_write = seqno-1;
+    ab_read = seqno;
+    ab_synced = INSYNC;
     pthread_mutex_unlock(&ab_mutex);
+    state = BUFFERING;
+    return result;
 }
 
 int player_play(stream_cfg *stream) {

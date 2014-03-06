@@ -379,10 +379,37 @@ static void handle_teardown(rtsp_conn_info *conn,
 
 static void handle_flush(rtsp_conn_info *conn,
                          rtsp_message *req, rtsp_message *resp) {
+    int seq;
+    unsigned long rtp_tsp;
+    unsigned long rtptime;
+
     if (!rtsp_playing())
         return;
-    player_flush();
+
+    char *hdr = msg_get_header(req, "RTP-Info");
+    if (!hdr)
+        return;
+    char *p;
+    p = strstr(hdr, "seq=");
+    if (!p)
+        return;
+    p = strchr(p, '=') + 1;
+    seq = atoi(p);
+    p = strstr(hdr, "rtptime=");
+    if (!p)
+        return;
+    p = strchr(p, '=') + 1;
+    rtptime = strtoul(p, NULL, 0);
+    debug(1, "Received seq: %04X, rtptime: %lu\n", seq, rtptime);
+
+    rtp_tsp = player_flush(seq, rtptime);
+    char *resphdr = malloc(32);
+    sprintf(resphdr, "rtptime=%lu", rtp_tsp);
+    debug(1, "Reporting RTP-Info: %s\n", resphdr);
+    msg_add_header(resp, "RTP-Info", resphdr);
     resp->respcode = 200;
+
+    free(resphdr);
 }
 
 static void handle_setup(rtsp_conn_info *conn,
@@ -429,6 +456,36 @@ static void handle_setup(rtsp_conn_info *conn,
 cleanup_handle_setup:
     free(cport);
     free(tport);
+}
+
+static void handle_record(rtsp_conn_info *conn,
+                         rtsp_message *req, rtsp_message *resp) {
+    int seq;
+    unsigned long rtptime;
+    char *hdr = msg_get_header(req, "RTP-Info");
+    if (!hdr)
+        return;
+    char *p;
+    p = strstr(hdr, "seq=");
+    if (!p)
+        return;
+    p = strchr(p, '=') + 1;
+    seq = atoi(p);
+    p = strstr(hdr, "rtptime=");
+    if (!p)
+        return;
+    p = strchr(p, '=') + 1;
+    rtptime = strtoul(p, NULL, 0);
+    debug(1, "Received seq: %04X, rtptime: %lu\n", seq, rtptime);
+    player_flush(seq, rtptime);
+
+    char *resphdr = malloc(10);
+    sprintf(resphdr, "%d", config.delay/1000);
+    debug(1, "Reporting %sms delay\n", resphdr);
+    msg_add_header(resp, "Audio-Latency", resphdr);
+    resp->respcode = 200;
+
+    free(resphdr);
 }
 
 static void handle_ignore(rtsp_conn_info *conn,
@@ -533,7 +590,7 @@ static struct method_handler {
     {"SETUP",           handle_setup},
     {"GET_PARAMETER",   handle_ignore},
     {"SET_PARAMETER",   handle_set_parameter},
-    {"RECORD",          handle_ignore},
+    {"RECORD",          handle_record},
     {NULL,              NULL}
 };
 
