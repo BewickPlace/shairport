@@ -537,7 +537,7 @@ unsigned long player_flush(int seqno, unsigned long rtp_tsp) {
     }
 
     ab_resync();
-    ab_write = seqno-1;
+    ab_write = seqno;
     ab_read = seqno;
     ab_synced = INSYNC;
     pthread_mutex_unlock(&ab_mutex);
