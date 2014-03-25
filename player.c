@@ -294,8 +294,6 @@ static inline short dithered_vol(short sample) {
     return out>>16;
 }
 
-static double bf_playback_rate = 1.0;
-
 // get the next frame, when available. return 0 if underrun/stream reset.
 static short *buffer_get_frame(sync_cfg *sync_tag) {
     int16_t buf_fill;
@@ -407,6 +405,8 @@ static void *player_thread_func(void *arg) {
     resbuf = malloc(OUTFRAME_BYTES(frame_size));
     silence = malloc(OUTFRAME_BYTES(frame_size));
     memset(silence, 0, OUTFRAME_BYTES(frame_size));
+    double bf_playback_rate = 1.0;
+
 
 #ifdef FANCY_RESAMPLING
     float *frame, *outframe;
@@ -496,9 +496,10 @@ static void *player_thread_func(void *arg) {
             if (sync_tag.sync_mode == NTPSYNC) {
                 //check if we're still in sync.
                 sync_time = get_sync_time(sync_tag.ntp_tsp);
-                sync_time_diff = (ALPHA * sync_time_diff) + (1 - ALPHA) * (double)sync_time;
-                debug(2, "Sync'ed diff sync_time %lld\n", sync_time);
-                bf_playback_rate = 1 - (sync_time_diff / LOSS);
+                sync_time_diff = ((double)sync_time / 1000000.0);
+                sync_time_diff = fmin(sync_time_diff,  0.999999);
+                sync_time_diff = fmax(sync_time_diff, -0.999999);
+                bf_playback_rate = 1.0 - sync_time_diff;
                 debug(2, "Sync timers: fill %i playback_rate %f, sync_time %lld\n", seq_diff(ab_read, ab_write), bf_playback_rate, sync_time);
             }
             break;
