@@ -211,6 +211,6 @@ static long long get_delay(void) {
     frames = 0;
   }
 
-  return frames * 1000000 / device_sample_rate;
+  return frames * (1000000 / device_sample_rate);
 }
 

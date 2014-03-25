@@ -102,7 +102,7 @@ static void update_ntp_cache(long long offset, long long arrival_time) {
 static long long tv_to_us(struct timeval tv) {
     long long usecs;
 
-    usecs = tv.tv_sec * 1000000;
+    usecs = tv.tv_sec * 1000000LL;
 
     return usecs + tv.tv_usec;
 }
@@ -110,7 +110,7 @@ static long long tv_to_us(struct timeval tv) {
 static long long tspk_to_us(struct timespec tspk) {
     long long usecs;
 
-    usecs = tspk.tv_sec * 1000000;
+    usecs = tspk.tv_sec * 1000000LL;
 
     return usecs + (tspk.tv_nsec / 1000);
 }
