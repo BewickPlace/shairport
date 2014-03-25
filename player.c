@@ -86,8 +86,7 @@ int state;
 
 //buffer states
 #define SIGNALLOSS 0
-#define UNSYNC 1
-#define INSYNC 2
+#define INSYNC 1
 
 typedef struct audio_buffer_entry {   // decoded audio packets
     int ready;
@@ -99,7 +98,7 @@ static abuf_t audio_buffer[BUFFER_FRAMES];
 
 // mutex-protected variables
 static seq_t ab_read, ab_write;
-static int ab_buffering = 1, ab_synced = 0;
+static int ab_buffering = 1, ab_synced = SIGNALLOSS;
 static pthread_mutex_t ab_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static void bf_est_reset(short fill);
@@ -215,6 +214,12 @@ static long us_to_frames(long long us) {
     return us * sampling_rate / 1000000;
 }
 
+static inline long long get_sync_time(long long ntp_tsp) {
+    long long sync_time_est;
+    sync_time_est = (ntp_tsp + config.delay) - (tstp_us() + get_ntp_offset() + config.output->get_delay());
+    return sync_time_est;
+}
+
 void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
     abuf_t *abuf = 0;
     int16_t buf_fill;
@@ -224,7 +229,7 @@ void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
         debug(2, "picking up first seqno %04X\n", seqno);
         ab_write = seqno;
         ab_read = seqno;
-        ab_synced = UNSYNC;
+        ab_synced = INSYNC;
     }
     debug(3, "packet: ab_write %04X, ab_read %04X, seqno %04X\n", ab_write, ab_read, seqno);
     if (seq_diff(ab_write, seqno) == 0) {                  // expected packet
@@ -255,9 +260,15 @@ void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
     }
 
     pthread_mutex_lock(&ab_mutex);
-    if (ab_buffering && buf_fill >= config.buffer_start_fill) {
-        debug(1, "buffering over. starting play (%04X:%04X)\n", ab_read, ab_write);
-        ab_buffering = 0;
+    if (ab_buffering && (sync_tag.sync_mode == NTPSYNC)) {
+       // only stop buffering when the new frame is a timestamp with good sync
+       long long sync_time = get_sync_time(sync_tag.ntp_tsp);
+       if (sync_time > (config.delay/8)) {
+          debug(1, "buffering over. starting play (%04X:%04X) sync: %lld\n", ab_read, ab_write, sync_time);
+          ab_buffering = 0;
+       }
+       ab_reset(ab_read, seqno);
+       ab_read = seqno;
     }
     pthread_mutex_unlock(&ab_mutex);
 }
@@ -312,10 +323,6 @@ static short *buffer_get_frame(sync_cfg *sync_tag) {
         ab_read = ab_write - config.buffer_start_fill;
 	ab_reset((ab_write - BUFFER_FRAMES), ab_read);	// reset any ready frames in those we've skipped (avoiding wrap around)
     }
-    if (ab_synced == UNSYNC && buf_fill < config.buffer_start_fill) {
-        pthread_mutex_unlock(&ab_mutex);
-        return 0;
-    }
 
     // check if t+16, t+32, t+64, t+128, ... resend focus boundary
     // packets have arrived... last-chance resend
@@ -334,13 +341,6 @@ static short *buffer_get_frame(sync_cfg *sync_tag) {
     if (!curframe->ready) {
         debug(1, "missing frame %04X\n", read);
         memset(curframe->data, 0, FRAME_BYTES(frame_size));
-    }
-    if (ab_synced == UNSYNC && (curframe->sync.sync_mode == NTPSYNC)) {
-        debug(1, "Timestamped frame found, resuming playback\n");
-        ab_synced = INSYNC;
-        state = BUFFERING;
-        pthread_mutex_unlock(&ab_mutex);
-        return 0;
     }
     ab_read++;
     curframe->ready = 0;
@@ -389,12 +389,6 @@ static int stuff_buffer(double playback_rate, short *inptr, short *outptr) {
     pthread_mutex_unlock(&vol_mutex);
 
     return frame_size + stuff;
-}
-
-static inline long long get_sync_time(long long ntp_tsp) {
-    long long sync_time_est;
-    sync_time_est = (ntp_tsp + config.delay) - (tstp_us() + get_ntp_offset() + config.output->get_delay());
-    return sync_time_est;
 }
 
 //constant first-order filter
@@ -505,7 +499,7 @@ static void *player_thread_func(void *arg) {
                 sync_time_diff = (ALPHA * sync_time_diff) + (1 - ALPHA) * (double)sync_time;
                 debug(2, "Sync'ed diff sync_time %lld\n", sync_time);
                 bf_playback_rate = 1 - (sync_time_diff / LOSS);
-                debug(2, "bf_playback_rate %f, sync_time %lld\n", bf_playback_rate, sync_time);
+                debug(2, "Sync timers: fill %i playback_rate %f, sync_time %lld\n", seq_diff(ab_read, ab_write), bf_playback_rate, sync_time);
             }
             break;
         }
