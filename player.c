@@ -222,18 +222,18 @@ void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
     pthread_mutex_lock(&ab_mutex);
     if (ab_synced == SIGNALLOSS) {
         debug(2, "picking up first seqno %04X\n", seqno);
-        ab_write = seqno-1;
+        ab_write = seqno;
         ab_read = seqno;
         ab_synced = UNSYNC;
     }
     debug(3, "packet: ab_write %04X, ab_read %04X, seqno %04X\n", ab_write, ab_read, seqno);
-    if (seq_diff(ab_write, seqno) == 1) {                  // expected packet
+    if (seq_diff(ab_write, seqno) == 0) {                  // expected packet
         abuf = audio_buffer + BUFIDX(seqno);
-        ab_write = seqno;
+        ab_write++;
     } else if (seq_order(ab_write, seqno)) {    // newer than expected
         rtp_request_resend(ab_write+1, seqno-1);
         abuf = audio_buffer + BUFIDX(seqno);
-        ab_write = seqno;
+        ab_write = seqno+1;
     } else if (seq_order(ab_read - 1, seqno)) {     // late but not yet played
         abuf = audio_buffer + BUFIDX(seqno);
 	if (abuf->ready) {			// discard this frame if frame previously received
@@ -288,7 +288,7 @@ static double bf_playback_rate = 1.0;
 // get the next frame, when available. return 0 if underrun/stream reset.
 static short *buffer_get_frame(sync_cfg *sync_tag) {
     int16_t buf_fill;
-    seq_t read, next;
+    seq_t next;
     abuf_t *abuf = 0;
     int i;
 
@@ -309,17 +309,13 @@ static short *buffer_get_frame(sync_cfg *sync_tag) {
     }
     if (buf_fill >= BUFFER_FRAMES) {   // overrunning! uh-oh. restart at a sane distance
         warn("overrun %i (%04X:%04X)", buf_fill, ab_read, ab_write);
-	read = ab_read;
         ab_read = ab_write - config.buffer_start_fill;
-	ab_reset((ab_write + 1 - BUFFER_FRAMES), ab_read);	// reset any ready frames in those we've skipped (avoiding wrap around)
+	ab_reset((ab_write - BUFFER_FRAMES), ab_read);	// reset any ready frames in those we've skipped (avoiding wrap around)
     }
     if (ab_synced == UNSYNC && buf_fill < config.buffer_start_fill) {
         pthread_mutex_unlock(&ab_mutex);
         return 0;
     }
-    read = ab_read;
-    ab_read++;
-
 
     // check if t+16, t+32, t+64, t+128, ... resend focus boundary
     // packets have arrived... last-chance resend
@@ -334,19 +330,19 @@ static short *buffer_get_frame(sync_cfg *sync_tag) {
         }
     }
 
-    abuf_t *curframe = audio_buffer + BUFIDX(read);
+    abuf_t *curframe = audio_buffer + BUFIDX(ab_read);
     if (!curframe->ready) {
         debug(1, "missing frame %04X\n", read);
         memset(curframe->data, 0, FRAME_BYTES(frame_size));
     }
     if (ab_synced == UNSYNC && (curframe->sync.sync_mode == NTPSYNC)) {
         debug(1, "Timestamped frame found, resuming playback\n");
-        ab_read--;
         ab_synced = INSYNC;
         state = BUFFERING;
         pthread_mutex_unlock(&ab_mutex);
         return 0;
     }
+    ab_read++;
     curframe->ready = 0;
     sync_tag->rtp_tsp = curframe->sync.rtp_tsp;
     sync_tag->ntp_tsp = curframe->sync.ntp_tsp;
