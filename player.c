@@ -117,9 +117,13 @@ static void ab_reset(seq_t from, seq_t to) {
     abuf_t *abuf = 0;
 
     while (seq_diff(from, to)) {
-	abuf = audio_buffer + BUFIDX(from);
-	abuf->ready = 0;
-	from++;
+        if (seq_diff(from, to) >= BUFFER_FRAMES) {
+           from =  from + BUFFER_FRAMES;
+        } else {
+           abuf = audio_buffer + BUFIDX(from);
+           abuf->ready = 0;
+           from++;
+        }
     }
 }
 
@@ -237,7 +241,7 @@ void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
         abuf = audio_buffer + BUFIDX(seqno);
         ab_write++;
     } else if (seq_order(ab_write, seqno)) {    // newer than expected
-        rtp_request_resend(ab_write+1, seqno-1);
+        rtp_request_resend(ab_write, seqno-1);
         abuf = audio_buffer + BUFIDX(seqno);
         ab_write = seqno+1;
     } else if (seq_order(ab_read - 1, seqno)) {     // late but not yet played
@@ -338,7 +342,7 @@ static short *buffer_get_frame(sync_cfg *sync_tag) {
 
     abuf_t *curframe = audio_buffer + BUFIDX(ab_read);
     if (!curframe->ready) {
-        debug(1, "missing frame %04X\n", read);
+        debug(1, "missing frame %04X\n", ab_read);
         memset(curframe->data, 0, FRAME_BYTES(frame_size));
     }
     ab_read++;
