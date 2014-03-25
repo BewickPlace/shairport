@@ -381,47 +381,114 @@ static void handle_teardown(rtsp_conn_info *conn,
 
 static void handle_flush(rtsp_conn_info *conn,
                          rtsp_message *req, rtsp_message *resp) {
+    int seq;
+    unsigned long rtp_tsp;
+    unsigned long rtptime;
+
     if (!rtsp_playing())
         return;
-    player_flush();
+
+    char *hdr = msg_get_header(req, "RTP-Info");
+    if (!hdr)
+        return;
+    char *p;
+    p = strstr(hdr, "seq=");
+    if (!p)
+        return;
+    p = strchr(p, '=') + 1;
+    seq = atoi(p);
+    p = strstr(hdr, "rtptime=");
+    if (!p)
+        return;
+    p = strchr(p, '=') + 1;
+    rtptime = strtoul(p, NULL, 0);
+    debug(1, "Received seq: %04X, rtptime: %lu\n", seq, rtptime);
+
+    rtp_tsp = player_flush(seq, rtptime);
+    char *resphdr = malloc(32);
+    sprintf(resphdr, "rtptime=%lu", rtp_tsp);
+    debug(1, "Reporting RTP-Info: %s\n", resphdr);
+    msg_add_header(resp, "RTP-Info", resphdr);
     resp->respcode = 200;
+
+    free(resphdr);
 }
 
 static void handle_setup(rtsp_conn_info *conn,
                          rtsp_message *req, rtsp_message *resp) {
-    int cport, tport;
+    int *cport;
+    int *tport;
     char *hdr = msg_get_header(req, "Transport");
     if (!hdr)
         return;
+    debug(1, "Transport:%s\n", hdr);
 
     char *p;
+    cport = malloc(sizeof(cport));
+    tport = malloc(sizeof(tport));
     p = strstr(hdr, "control_port=");
     if (!p)
-        return;
+        goto cleanup_handle_setup;
     p = strchr(p, '=') + 1;
-    cport = atoi(p);
+    *cport = atoi(p);
 
     p = strstr(hdr, "timing_port=");
     if (!p)
-        return;
+        goto cleanup_handle_setup;
     p = strchr(p, '=') + 1;
-    tport = atoi(p);
+    *tport = atoi(p);
 
     rtsp_take_player();
     int sport = rtp_setup(&conn->remote, cport, tport);
     if (!sport)
-        return;
+        goto cleanup_handle_setup;
+    debug(1,"starting player_play\n");
     digitalWrite(11, 0);	/* On Set-up:	Turn Amplifier ON - disable sleep */
 
     player_play(&conn->stream);
 
-    char *resphdr = malloc(strlen(hdr) + 20);
-    sprintf(resphdr, "%s;server_port=%d;control_port=%d;timing_port=%d", "RTP/AVP/UDP;unicast;mode=record", sport, sport, sport);
+    char *resphdr = malloc(strlen(hdr) + 40);
+    sprintf(resphdr, "%s;server_port=%d;control_port=%d;timing_port=%d",
+            "RTP/AVP/UDP;unicast;interleaved=0-1;mode=record", sport, *cport, *tport);
+
     msg_add_header(resp, "Transport", resphdr);
 
     msg_add_header(resp, "Session", "1");
 
     resp->respcode = 200;
+cleanup_handle_setup:
+    free(cport);
+    free(tport);
+}
+
+static void handle_record(rtsp_conn_info *conn,
+                         rtsp_message *req, rtsp_message *resp) {
+    int seq;
+    unsigned long rtptime;
+    char *hdr = msg_get_header(req, "RTP-Info");
+    if (!hdr)
+        return;
+    char *p;
+    p = strstr(hdr, "seq=");
+    if (!p)
+        return;
+    p = strchr(p, '=') + 1;
+    seq = atoi(p);
+    p = strstr(hdr, "rtptime=");
+    if (!p)
+        return;
+    p = strchr(p, '=') + 1;
+    rtptime = strtoul(p, NULL, 0);
+    debug(1, "Received seq: %04X, rtptime: %lu\n", seq, rtptime);
+    player_flush(seq, rtptime);
+
+    char *resphdr = malloc(10);
+    sprintf(resphdr, "%d", config.delay/1000);
+    debug(1, "Reporting %sms delay\n", resphdr);
+    msg_add_header(resp, "Audio-Latency", resphdr);
+    resp->respcode = 200;
+
+    free(resphdr);
 }
 
 static void handle_ignore(rtsp_conn_info *conn,
@@ -526,7 +593,7 @@ static struct method_handler {
     {"SETUP",           handle_setup},
     {"GET_PARAMETER",   handle_ignore},
     {"SET_PARAMETER",   handle_set_parameter},
-    {"RECORD",          handle_ignore},
+    {"RECORD",          handle_record},
     {NULL,              NULL}
 };
 
