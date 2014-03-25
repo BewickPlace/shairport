@@ -77,6 +77,7 @@ static pthread_mutex_t vol_mutex = PTHREAD_MUTEX_INITIALIZER;
 // needs to be a power of 2 because of the way BUFIDX(seqno) works
 #define BUFFER_FRAMES  512
 #define MAX_PACKET      2048
+#define RESEND_FOCUS   (BUFFER_FRAMES/4)
 
 //player states
 #define BUFFERING 0
@@ -241,7 +242,7 @@ void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
         abuf = audio_buffer + BUFIDX(seqno);
         ab_write++;
     } else if (seq_order(ab_write, seqno)) {    // newer than expected
-        rtp_request_resend(ab_write, seqno-1);
+        if (!ab_buffering) {rtp_request_resend(ab_write, seqno-1);}
         abuf = audio_buffer + BUFIDX(seqno);
         ab_write = seqno+1;
     } else if (seq_order(ab_read - 1, seqno)) {     // late but not yet played
@@ -323,14 +324,14 @@ static short *buffer_get_frame(sync_cfg *sync_tag) {
     }
     if (buf_fill >= BUFFER_FRAMES) {   // overrunning! uh-oh. restart at a sane distance
         warn("overrun %i (%04X:%04X)", buf_fill, ab_read, ab_write);
-        ab_read = ab_write - config.buffer_start_fill;
+        ab_read = ab_write - (BUFFER_FRAMES/2);
 	ab_reset((ab_write - BUFFER_FRAMES), ab_read);	// reset any ready frames in those we've skipped (avoiding wrap around)
     }
 
     // check if t+16, t+32, t+64, t+128, ... resend focus boundary
     // packets have arrived... last-chance resend
     if (!ab_buffering) {
-        for (i = 16; i <= (config.buffer_start_fill/2); i = (i * 2)) {
+        for (i = 16; i <= RESEND_FOCUS; i = (i * 2)) {
             next = ab_read + i;
             abuf = audio_buffer + BUFIDX(next);
             if ((!abuf->ready) && (next < ab_write)){
