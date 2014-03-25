@@ -109,6 +109,7 @@ static void ab_resync(void) {
         audio_buffer[i].ready = 0;
     ab_synced = SIGNALLOSS;
     ab_buffering = 1;
+    state = BUFFERING;
 }
 
 // reset the audio frames in the range to NOT ready
@@ -540,7 +541,6 @@ unsigned long player_flush(int seqno, unsigned long rtp_tsp) {
     ab_read = seqno;
     ab_synced = INSYNC;
     pthread_mutex_unlock(&ab_mutex);
-    state = BUFFERING;
     return result;
 }
 
