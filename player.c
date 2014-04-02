@@ -242,6 +242,7 @@ void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
         abuf = audio_buffer + BUFIDX(seqno);
         ab_write++;
     } else if (seq_order(ab_write, seqno)) {    // newer than expected
+        debug(1, "advance packet %04X (%04X:%04X)\n", seqno, ab_read, ab_write);
         if (!ab_buffering) {rtp_request_resend(ab_write, seqno-1);}
         abuf = audio_buffer + BUFIDX(seqno);
         ab_write = seqno+1;
@@ -269,7 +270,7 @@ void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
     if (ab_buffering && (sync_tag.sync_mode == NTPSYNC)) {
        // only stop buffering when the new frame is a timestamp with good sync
        long long sync_time = get_sync_time(sync_tag.ntp_tsp);
-       if (sync_time > (config.delay/8)) {
+       if (sync_time > (config.delay/4)) {
           debug(1, "buffering over. starting play (%04X:%04X) sync: %lld\n", ab_read, ab_write, sync_time);
           ab_buffering = 0;
        }
