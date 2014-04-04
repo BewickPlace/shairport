@@ -514,7 +514,6 @@ static void *player_thread_func(void *arg) {
                 play_samples = srcdat.output_frames_gen;
             } else
 #endif
-            play_samples = stuff_buffer(bf_playback_rate, inbuf, outbuf);
             if (sync_tag.sync_mode == NTPSYNC) {
                 //check if we're still in sync.
                 sync_time = get_sync_time(sync_tag.ntp_tsp);
@@ -524,6 +523,7 @@ static void *player_thread_func(void *arg) {
                 bf_playback_rate = 1.0 - sync_time_diff;
                 debug(2, "Sync timers: fill %i playback_rate %f, sync_time %lld\n", seq_diff(ab_read, ab_write), bf_playback_rate, sync_time);
             }
+            play_samples = stuff_buffer(bf_playback_rate, inbuf, outbuf);
             break;
         }
         default:
