@@ -350,7 +350,7 @@ static short *buffer_get_frame(sync_cfg *sync_tag) {
         for (i = 16; i <= RESEND_FOCUS; i = (i * 2)) {
             next = ab_read + i;
             abuf = audio_buffer + BUFIDX(next);
-            if ((!abuf->ready) && (next < (ab_write-1))){
+            if ((!abuf->ready) && (seq_order(next,(ab_write-1)))){
                 rtp_request_resend(next, next);
                 debug(1, "last chance resend T+%i, %04X (%04X:%04X)\n", i, next, ab_read, ab_write);
             }
