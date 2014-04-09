@@ -127,14 +127,6 @@ static void update_ntp_cache(long long offset, long long arrival_time) {
     debug(2, "ntp: offset: %lld, d: %d\n", ntp_cache[NTPCACHESIZE], d);
 }
 
-static long long tv_to_us(struct timeval tv) {
-    long long usecs;
-
-    usecs = tv.tv_sec * 1000000;
-
-    return usecs + tv.tv_usec;
-}
-
 static long long tspk_to_us(struct timespec tspk) {
     long long usecs;
 
