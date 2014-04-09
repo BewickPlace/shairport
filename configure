@@ -57,6 +57,30 @@ do_pkg_config()
     fi
 }
 
+#figure out which time function to use
+check_time_function()
+{
+    cat >function_test.c <<FUNC_EOF
+#include <time.h>
+
+int main(int argc, char **argv){
+    struct timespec *tsp;
+    clock_gettime(CLOCK_MONOTONIC, tsp);
+}
+FUNC_EOF
+
+    if gcc function_test.c -lrt > /dev/null 2>&1 ;  then
+    echo "clock_gettime() found"
+        LDFLAGS="${LDFLAGS} -lrt"
+    else
+    	echo "Trying if we should be using mach time"
+    	check_header mach/mach.h
+    	check_header mach/clock.h
+    	export_config MACH_TIME
+    fi
+    rm -f function_test.c
+}
+
 do_pkg_config OpenSSL       openssl
 do_pkg_config libao         ao              CONFIG_AO
 do_pkg_config PulseAudio    libpulse-simple CONFIG_PULSE
@@ -76,6 +100,7 @@ if [ -z "$CONFIG_AVAHI" ]; then
     check_header  dns_sd.h      CONFIG_HAVE_DNS_SD_H
 fi
 
+check_time_function
 
 echo "CFLAGS+=${CFLAGS}" >> config.mk
 echo "LDFLAGS+=${LDFLAGS}" >> config.mk
