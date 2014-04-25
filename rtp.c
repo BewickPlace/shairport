@@ -135,6 +135,7 @@ static void *rtp_receiver(void *arg) {
     uint8_t packet[2048], *pktp;
     long long ntp_tsp_sync;
     unsigned long rtp_tsp_sync;
+    int first_after_sync = 0;
 
     ssize_t nread;
     while (1) {
@@ -156,6 +157,7 @@ static void *rtp_receiver(void *arg) {
             debug(2, "Sync packet rtp_tsp %lu\n", rtp_tsp_sync);
             ntp_tsp_sync = ntp_tsp_to_us(ntohl(*(uint32_t *)(packet+8)), ntohl(*(uint32_t *)(packet+12)));
             debug(2, "Sync packet ntp_tsp %lld\n", ntp_tsp_sync);
+            first_after_sync = 1;
             continue;
         }
         if (type == 0x60 || type == 0x56) {   // audio data / resend
@@ -178,12 +180,14 @@ static void *rtp_receiver(void *arg) {
                 //      this sync is udp, hence unreliable.
                 //      Alternatively, just check marker bit.
                 sync_tag.rtp_tsp = rtp_tsp;
-                if (rtp_tsp == rtp_tsp_sync) {
-                    debug(1, "Packet for with sync data was sent has arrived (%04X)\n", seqno);
+                if (first_after_sync == 1) {
+                    first_after_sync = 0;
+                    debug(1, "Packet with sync'd data has arrived (%04X) sync:%i\n", seqno, abs(rtp_tsp - rtp_tsp_sync));
                     sync_tag.ntp_tsp = ntp_tsp_sync;
                     sync_tag.sync_mode = NTPSYNC;
-                } else
+                } else {
                     sync_tag.sync_mode = NOSYNC;
+                }
 
                 player_put_packet(seqno, sync_tag, pktp, plen);
                 continue;
