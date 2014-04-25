@@ -466,8 +466,8 @@ static void handle_record(rtsp_conn_info *conn,
     int seq;
     unsigned long rtptime;
     char *hdr = msg_get_header(req, "RTP-Info");
-    if (!hdr)
-        return;
+    if (hdr) {
+
     char *p;
     p = strstr(hdr, "seq=");
     if (!p)
@@ -481,6 +481,7 @@ static void handle_record(rtsp_conn_info *conn,
     rtptime = strtoul(p, NULL, 0);
     debug(1, "Received seq: %04X, rtptime: %lu\n", seq, rtptime);
     player_flush(seq, rtptime);
+    }
 
     char *resphdr = malloc(10);
     sprintf(resphdr, "%d", config.delay/1000);
