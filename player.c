@@ -325,10 +325,11 @@ static short *buffer_get_frame(sync_cfg *sync_tag) {
 
     sync_tag->sync_mode = NOSYNC;
 
-    if (ab_buffering)
-        return 0;
-
     pthread_mutex_lock(&ab_mutex);
+    if (ab_buffering) {
+        pthread_mutex_unlock(&ab_mutex);
+        return 0;
+    }
 
     buf_fill = seq_diff(ab_read, ab_write);
     if (buf_fill < 1) {
