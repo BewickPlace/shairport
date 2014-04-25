@@ -282,8 +282,8 @@ void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
     }
 
     pthread_mutex_lock(&ab_mutex);
-    if (ab_buffering && (sync_tag.sync_mode == NTPSYNC)) {
-       // only stop buffering when the new frame is a timestamp with good sync
+    if ( abuf && (ab_buffering && (sync_tag.sync_mode == NTPSYNC))) {
+       // only stop buffering when the new frame is valid and a timestamp with good sync
        long long sync_time = get_sync_time(sync_tag.ntp_tsp);
        if (sync_time > (config.delay/4)) {
           debug(1, "buffering over. starting play (%04X:%04X) sync: %lld\n", ab_read, ab_write, sync_time);
