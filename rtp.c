@@ -49,6 +49,12 @@ static pthread_t rtp_thread;
 static pthread_t ntp_receive_thread;
 static pthread_t ntp_send_thread;
 long long ntp_cache[NTPCACHESIZE + 1];
+static int strict_rtp;
+
+void rtp_record(int rtp_mode){
+    debug(2, "Setting strict_rtp tp %d\n", rtp_mode);
+    strict_rtp= rtp_mode;
+}
 
 static void reset_ntp_cache() {
     int i;
@@ -135,7 +141,7 @@ static void *rtp_receiver(void *arg) {
     uint8_t packet[2048], *pktp;
     long long ntp_tsp_sync;
     unsigned long rtp_tsp_sync;
-    int first_after_sync = 0;
+    int sync_mode = NOSYNC;
 
     ssize_t nread;
     while (1) {
@@ -157,7 +163,7 @@ static void *rtp_receiver(void *arg) {
             debug(2, "Sync packet rtp_tsp %lu\n", rtp_tsp_sync);
             ntp_tsp_sync = ntp_tsp_to_us(ntohl(*(uint32_t *)(packet+8)), ntohl(*(uint32_t *)(packet+12)));
             debug(2, "Sync packet ntp_tsp %lld\n", ntp_tsp_sync);
-            first_after_sync = 1;
+            sync_mode = NTPSYNC;
             continue;
         }
         if (type == 0x60 || type == 0x56) {   // audio data / resend
@@ -180,11 +186,12 @@ static void *rtp_receiver(void *arg) {
                 //      this sync is udp, hence unreliable.
                 //      Alternatively, just check marker bit.
                 sync_tag.rtp_tsp = rtp_tsp;
-                if (first_after_sync == 1) {
-                    first_after_sync = 0;
-                    debug(1, "Packet with sync'd data has arrived (%04X) sync:%i\n", seqno, abs(rtp_tsp - rtp_tsp_sync));
+                if (((strict_rtp && (rtp_tsp == rtp_tsp_sync)) || (!strict_rtp && (type!=0x56) &&(sync_mode == NTPSYNC)))) {
+                    debug(2, "Packet with sync'd data has arrived (%04X) sync:%i\n", seqno, abs(rtp_tsp - rtp_tsp_sync));
                     sync_tag.ntp_tsp = ntp_tsp_sync;
                     sync_tag.sync_mode = NTPSYNC;
+                    if (!strict_rtp)
+                       sync_mode = NOSYNC;
                 } else {
                     sync_tag.sync_mode = NOSYNC;
                 }
@@ -271,6 +278,7 @@ static void send_timing_packet(int max_delay_time_ms) {
 
     clock_gettime(CLOCK_MONOTONIC, &tv);
     *(uint32_t *)(req+24) = htonl((uint32_t)tv.tv_sec);
+
     *(uint32_t *)(req+28) = htonl((uint32_t)tv.tv_nsec * 0x100000000 / (1000 * 1000 * 1000));
 
     sendto(timing_sock, req, sizeof(req), 0, (struct sockaddr*)&rtp_timing, sizeof(rtp_timing));
