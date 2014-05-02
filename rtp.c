@@ -32,8 +32,15 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
+#include "config.h"
 #include "common.h"
 #include "player.h"
+#ifdef MACH_TIME
+#include <mach/mach.h>
+#include <mach/clock.h>
+#endif
+
+#define NTPCACHESIZE 7
 
 #define NTPCACHESIZE 7
 
@@ -52,8 +59,25 @@ long long ntp_cache[NTPCACHESIZE + 1];
 static int strict_rtp;
 
 void rtp_record(int rtp_mode){
-    debug(2, "Setting strict_rtp tp %d\n", rtp_mode);
-    strict_rtp= rtp_mode;
+    debug(2, "Setting strict_rtp to %d\n", rtp_mode);
+    strict_rtp = rtp_mode;
+}
+
+static void get_current_time(struct timespec *tsp) {
+#ifdef MACH_TIME
+    kern_return_t retval = KERN_SUCCESS;
+    clock_serv_t cclock;
+    mach_timespec_t mts;
+
+    host_get_clock_service(mach_host_self(), SYSTEM_CLOCK, &cclock);
+    retval = clock_get_time(cclock, &mts);
+    mach_port_deallocate(mach_task_self(), cclock);
+
+    tsp->tv_sec = mts.tv_sec;
+    tsp->tv_nsec = mts.tv_nsec;
+#else
+    clock_gettime(CLOCK_MONOTONIC, tsp);
+#endif
 }
 
 static void reset_ntp_cache() {
@@ -61,7 +85,7 @@ static void reset_ntp_cache() {
     for (i = 0; i < NTPCACHESIZE; i++) {
         ntp_cache[i] = LLONG_MIN;
     }
-    ntp_cache[LLONG_MIN] = 0;
+    ntp_cache[NTPCACHESIZE] = 0;
 }
 
 long long get_ntp_offset() {
@@ -80,7 +104,7 @@ static void update_ntp_cache(long long offset, long long arrival_time) {
     ntp_cache[NTPCACHESIZE - 1] = offset;
 
     d = 0;
-    minindex =0;
+    minindex = 0;
     maxindex = 0;
     for (i = 0; i < NTPCACHESIZE; i++) {
         if (ntp_cache[i] != LLONG_MIN) {
@@ -91,11 +115,11 @@ static void update_ntp_cache(long long offset, long long arrival_time) {
     }
     debug(2, "ntp: valid entries: %d\n", d);
     if (d < 5)
-        minindex, maxindex = -1;
+        minindex = maxindex = -1;
     d = 0;
     total = 0;
     for (i = 0; i < NTPCACHESIZE; i++) {
-        debug(2, "ntp[%d]: %lld, d: %d\n", i, ntp_cache[i] , d);
+        debug(3, "ntp[%d]: %lld, d: %d\n", i, ntp_cache[i] , d);
         if ((ntp_cache[i] != LLONG_MIN) && (i != minindex) && (i != maxindex)) {
             d++;
             total += ntp_cache[i];
@@ -103,14 +127,6 @@ static void update_ntp_cache(long long offset, long long arrival_time) {
     }
     ntp_cache[NTPCACHESIZE] = total / d;
     debug(2, "ntp: offset: %lld, d: %d\n", ntp_cache[NTPCACHESIZE], d);
-}
-
-static long long tv_to_us(struct timeval tv) {
-    long long usecs;
-
-    usecs = tv.tv_sec * 1000000LL;
-
-    return usecs + tv.tv_usec;
 }
 
 static long long tspk_to_us(struct timespec tspk) {
@@ -123,7 +139,7 @@ static long long tspk_to_us(struct timespec tspk) {
 
 long long tstp_us() {
     struct timespec tv;
-    clock_gettime(CLOCK_MONOTONIC, &tv);
+    get_current_time(&tv);
     return tspk_to_us(tv);
 }
 
@@ -182,19 +198,15 @@ static void *rtp_receiver(void *arg) {
             // check if packet contains enough content to be reasonable
             if (plen >= 16) {
                 sync_cfg sync_tag;
-                //todo: Use data from rtsp 'record' to ensure we have sync data for first packet
-                //      this sync is udp, hence unreliable.
-                //      Alternatively, just check marker bit.
                 sync_tag.rtp_tsp = rtp_tsp;
-                if (((strict_rtp && (rtp_tsp == rtp_tsp_sync)) || (!strict_rtp && (type!=0x56) &&(sync_mode == NTPSYNC)))) {
-                    debug(2, "Packet with sync'd data has arrived (%04X) sync:%i\n", seqno, abs(rtp_tsp - rtp_tsp_sync));
+                if (((strict_rtp && (rtp_tsp == rtp_tsp_sync)) || (!strict_rtp && (type!=0x56) && (sync_mode == NTPSYNC)))){
+                    debug(2, "Packet for with sync data was sent has arrived (%04X)\n", seqno);
                     sync_tag.ntp_tsp = ntp_tsp_sync;
                     sync_tag.sync_mode = NTPSYNC;
                     if (!strict_rtp)
-                       sync_mode = NOSYNC;
-                } else {
+                        sync_mode = NOSYNC;
+                } else
                     sync_tag.sync_mode = NOSYNC;
-                }
 
                 player_put_packet(seqno, sync_tag, pktp, plen);
                 continue;
@@ -227,7 +239,7 @@ static void *ntp_receiver(void *arg) {
         nread = recv(timing_sock, packet, sizeof(packet), 0);
         if (nread < 0)
             break;
-        clock_gettime(CLOCK_MONOTONIC, &tv);
+        get_current_time(&tv);
 
         ssize_t plen = nread;
         uint8_t type = packet[1] & ~0x80;
@@ -276,9 +288,8 @@ static void send_timing_packet(int max_delay_time_ms) {
     req[1] = 0x52|0x80;  // Apple 'ntp request'
     *(uint16_t *)(req+2) = htons(7);  // seq no, needs to be 7 or iTunes won't respond
 
-    clock_gettime(CLOCK_MONOTONIC, &tv);
+    get_current_time(&tv);
     *(uint32_t *)(req+24) = htonl((uint32_t)tv.tv_sec);
-
     *(uint32_t *)(req+28) = htonl((uint32_t)tv.tv_nsec * 0x100000000 / (1000 * 1000 * 1000));
 
     sendto(timing_sock, req, sizeof(req), 0, (struct sockaddr*)&rtp_timing, sizeof(rtp_timing));
@@ -384,7 +395,7 @@ int rtp_setup(SOCKADDR *remote, int *cport, int *tport) {
     *tport = bind_port(remote, sock);
     timing_sock = *sock;
 
-    debug(1, "rtp listening on dataport %d, controlport %d \n", server_port, cport);
+    debug(1, "rtp listening on dataport %d, controlport %d \n", server_port, *cport);
 
     please_shutdown = 0;
     pthread_create(&rtp_thread, NULL, &rtp_receiver, NULL);

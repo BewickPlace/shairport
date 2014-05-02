@@ -463,23 +463,23 @@ cleanup_handle_setup:
 
 static void handle_record(rtsp_conn_info *conn,
                          rtsp_message *req, rtsp_message *resp) {
-    int seq;
-    unsigned long rtptime;
+    int seq = -1;
+    unsigned long rtptime = 0;
     int rtp_mode = 0;
     char *hdr = msg_get_header(req, "RTP-Info");
     if (hdr) {
-       char *p;
-       p = strstr(hdr, "seq=");
-       if (!p)
-          return;
-       p = strchr(p, '=') + 1;
-       seq = atoi(p);
-       p = strstr(hdr, "rtptime=");
-       if (!p)
-          return;
-       p = strchr(p, '=') + 1;
-       rtptime = strtoul(p, NULL, 0);
-       rtp_mode = 1;
+        char *p;
+        p = strstr(hdr, "seq=");
+        if (!p)
+            return;
+        p = strchr(p, '=') + 1;
+        seq = atoi(p);
+        p = strstr(hdr, "rtptime=");
+        if (!p)
+            return;
+        p = strchr(p, '=') + 1;
+        rtptime = strtoul(p, NULL, 0);
+        rtp_mode = 1;
     }
     debug(1, "Received seq: %04X, rtptime: %lu\n", seq, rtptime);
     rtp_record(rtp_mode);

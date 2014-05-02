@@ -78,6 +78,7 @@ static pthread_mutex_t vol_mutex = PTHREAD_MUTEX_INITIALIZER;
 #define BUFFER_FRAMES  512
 #define MAX_PACKET      2048
 #define RESEND_FOCUS   (BUFFER_FRAMES/4)
+static int sane_buffer_size;
 
 //player states
 #define BUFFERING 0
@@ -87,7 +88,8 @@ int state;
 
 //buffer states
 #define SIGNALLOSS 0
-#define INSYNC 1
+#define UNSYNC 1
+#define INSYNC 2
 
 typedef struct audio_buffer_entry {   // decoded audio packets
     int ready;
@@ -101,8 +103,6 @@ static abuf_t audio_buffer[BUFFER_FRAMES];
 static seq_t ab_read, ab_write;
 static int ab_buffering = 1, ab_synced = SIGNALLOSS;
 static pthread_mutex_t ab_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-static void bf_est_reset(short fill);
 
 static void ab_resync(void) {
     int i;
@@ -235,7 +235,7 @@ void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
         debug(2, "picking up first seqno %04X\n", seqno);
         ab_write = seqno;
         ab_read = seqno;
-        ab_synced = INSYNC;
+        ab_synced = UNSYNC;
     }
     debug(3, "packet: ab_write %04X, ab_read %04X, seqno %04X\n", ab_write, ab_read, seqno);
     if (seq_diff(ab_write, seqno) == 0) {                  // expected packet
@@ -282,15 +282,19 @@ void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
     }
 
     pthread_mutex_lock(&ab_mutex);
-    if ( abuf && (ab_buffering && (sync_tag.sync_mode == NTPSYNC))) {
-       // only stop buffering when the new frame is valid and a timestamp with good sync
+    if (ab_synced == UNSYNC && (sync_tag.sync_mode == NTPSYNC)) {
+       // only stop buffering when the new frame is a timestamp with good sync
        long long sync_time = get_sync_time(sync_tag.ntp_tsp);
-       if (sync_time > (config.delay/4)) {
-          debug(1, "buffering over. starting play (%04X:%04X) sync: %lld\n", ab_read, ab_write, sync_time);
-          ab_buffering = 0;
+       if (sync_time > (config.delay/8)) {
+          debug(1, "found good sync (%04X:%04X) sync: %lld\n", ab_read, ab_write, sync_time);
+          ab_synced = INSYNC;
        }
        ab_reset(ab_read, seqno);
        ab_read = seqno;
+    }
+    if ((abuf) && (ab_synced == INSYNC) && (ab_buffering) && (buf_fill >= sane_buffer_size)) {
+        debug(1, "buffering over. starting play\n");
+        ab_buffering = 0;
     }
     pthread_mutex_unlock(&ab_mutex);
 }
@@ -342,6 +346,7 @@ static short *buffer_get_frame(sync_cfg *sync_tag) {
     if (buf_fill >= BUFFER_FRAMES) {   // overrunning! uh-oh. restart at a sane distance
         warn("overrun %i (%04X:%04X)", buf_fill, ab_read, ab_write);
         ab_read = ab_write - (BUFFER_FRAMES/2);
+//        ab_read = ab_write - sane_buffer_size;
 	ab_reset((ab_write - BUFFER_FRAMES), ab_read);	// reset any ready frames in those we've skipped (avoiding wrap around)
     }
 
@@ -393,12 +398,12 @@ static int stuff_buffer(double playback_rate, short *inptr, short *outptr) {
     };
     if (stuff) {
         if (stuff==1) {
-            debug(2, "+++++++++\n");
+            debug(3, "+++++++++\n");
             // interpolate one sample
             *outptr++ = dithered_vol(((long)inptr[-2] + (long)inptr[0]) >> 1);
             *outptr++ = dithered_vol(((long)inptr[-1] + (long)inptr[1]) >> 1);
         } else if (stuff==-1) {
-            debug(2, "---------\n");
+            debug(3, "---------\n");
             inptr++;
             inptr++;
         }
@@ -414,7 +419,9 @@ static int stuff_buffer(double playback_rate, short *inptr, short *outptr) {
 
 //constant first-order filter
 #define ALPHA 0.945
-#define LOSS 850000
+#define LOSS 850000.0
+
+static double bf_playback_rate = 1.0;
 
 static void *player_thread_func(void *arg) {
     int play_samples;
@@ -518,6 +525,8 @@ static void *player_thread_func(void *arg) {
             if (sync_tag.sync_mode == NTPSYNC) {
                 //check if we're still in sync.
                 sync_time = get_sync_time(sync_tag.ntp_tsp);
+//                sync_time_diff = (ALPHA * sync_time_diff) + (1.0- ALPHA) * (double)sync_time;
+//                bf_playback_rate = 1.0 - (sync_time_diff / LOSS);
                 sync_time_diff = ((double)sync_time / 1000000.0);
                 sync_time_diff = fmin(sync_time_diff,  0.999999);
                 sync_time_diff = fmax(sync_time_diff, -0.999999);
@@ -561,16 +570,12 @@ unsigned long player_flush(int seqno, unsigned long rtp_tsp) {
     ab_resync();
     ab_write = seqno;
     ab_read = seqno;
-    ab_synced = INSYNC;
+    ab_synced = (seqno < 0 ? SIGNALLOSS : UNSYNC);
     pthread_mutex_unlock(&ab_mutex);
     return result;
 }
 
 int player_play(stream_cfg *stream) {
-    if (config.buffer_start_fill > BUFFER_FRAMES)
-        die("specified buffer starting fill %d > buffer size %d",
-            config.buffer_start_fill, BUFFER_FRAMES);
-
     AES_set_decrypt_key(stream->aeskey, 128, &aes);
     aesiv = stream->aesiv;
     init_decoder(stream->fmtp);
@@ -579,6 +584,12 @@ int player_play(stream_cfg *stream) {
 #ifdef FANCY_RESAMPLING
     init_src();
 #endif
+
+    sane_buffer_size = ((config.delay / 1000) * sampling_rate * 2) / (frame_size * 1000 * 3);
+    sane_buffer_size = (sane_buffer_size >= 10 ? sane_buffer_size : 10);
+    if (sane_buffer_size > BUFFER_FRAMES)
+        die("buffer starting fill %d > buffer size %d", sane_buffer_size, BUFFER_FRAMES);
+    debug(1, "buffer size set to %d\n", sane_buffer_size);
 
     please_stop = 0;
     command_start();

@@ -87,8 +87,6 @@ void usage(char *progname) {
     printf("    -h, --help          show this help\n");
     printf("    -p, --port=PORT     set RTSP listening port\n");
     printf("    -a, --name=NAME     set advertised name\n");
-    printf("    -b FILL             set how full the buffer must be before audio output\n");
-    printf("                        starts. This value is in frames; default %d\n", config.buffer_start_fill);
     printf("    -t TIME             set how much audio is delayed.\n");
     printf("                        This value is in ms; default %d\n", config.delay/1000);
     printf("    -d, --daemon        fork (daemonise). The PID of the child process is\n");
@@ -157,9 +155,6 @@ int parse_options(int argc, char **argv) {
                 break;
             case 'o':
                 config.output_name = optarg;
-                break;
-            case 'b':
-                config.buffer_start_fill = atoi(optarg);
                 break;
             case 't':
                 config.delay = atoi(optarg) * 1000;
@@ -264,7 +259,6 @@ int main(int argc, char **argv) {
     memset(&config, 0, sizeof(config));
 
     // set defaults
-    config.buffer_start_fill = 20;
     config.delay = 2205000; //todo: check with an airport express what this should be
     config.port = 5002;
     char hostname[100];
