@@ -346,7 +346,6 @@ static short *buffer_get_frame(sync_cfg *sync_tag) {
     if (buf_fill >= BUFFER_FRAMES) {   // overrunning! uh-oh. restart at a sane distance
         warn("overrun %i (%04X:%04X)", buf_fill, ab_read, ab_write);
         ab_read = ab_write - (BUFFER_FRAMES/2);
-//        ab_read = ab_write - sane_buffer_size;
 	ab_reset((ab_write - BUFFER_FRAMES), ab_read);	// reset any ready frames in those we've skipped (avoiding wrap around)
     }
 
@@ -420,8 +419,6 @@ static int stuff_buffer(double playback_rate, short *inptr, short *outptr) {
 //constant first-order filter
 #define ALPHA 0.945
 #define LOSS 850000.0
-
-static double bf_playback_rate = 1.0;
 
 static void *player_thread_func(void *arg) {
     int play_samples;
@@ -585,7 +582,7 @@ int player_play(stream_cfg *stream) {
     init_src();
 #endif
 
-    sane_buffer_size = ((config.delay / 1000) * sampling_rate * 2) / (frame_size * 1000 * 3);
+    sane_buffer_size = (us_to_frames(config.delay)/frame_size) * 3 / 10;
     sane_buffer_size = (sane_buffer_size >= 10 ? sane_buffer_size : 10);
     if (sane_buffer_size > BUFFER_FRAMES)
         die("buffer starting fill %d > buffer size %d", sane_buffer_size, BUFFER_FRAMES);
