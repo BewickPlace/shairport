@@ -117,8 +117,8 @@ static void stop(void) {
 }
 
 static long long get_delay() {
-  pa_usec_t latency = (pa_usec_t) -1;
-  pa_simple_get_latency(pa_dev, &pa_error);
+  pa_usec_t latency;
+  latency = pa_simple_get_latency(pa_dev, &pa_error);
   if (pa_error < 0 )
   {
     latency = (pa_usec_t) 0;
