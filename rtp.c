@@ -32,6 +32,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
+#include <errno.h>
 #include "config.h"
 #include "common.h"
 #include "player.h"
@@ -275,6 +276,7 @@ static void *ntp_receiver(void *arg) {
 }
 
 static void send_timing_packet(int max_delay_time_ms) {
+    int cc;
     struct timespec tv;
     char req[32];
     memset(req, 0, sizeof(req));
@@ -288,7 +290,9 @@ static void send_timing_packet(int max_delay_time_ms) {
     *(uint32_t *)(req+24) = htonl((uint32_t)tv.tv_sec);
     *(uint32_t *)(req+28) = htonl((uint32_t)tv.tv_nsec * 0x100000000 / (1000 * 1000 * 1000));
 
-    sendto(timing_sock, req, sizeof(req), 0, (struct sockaddr*)&rtp_timing, sizeof(rtp_timing));
+    cc = sendto(timing_sock, req, sizeof(req), 0, (struct sockaddr*)&rtp_timing, sizeof(struct sockaddr));
+    if (cc < 0)
+        die("send packet failed in send_timing_packet (%d)\n", errno);
     debug(1, "Current time s:%lu us:%lu\n", (unsigned int) tv.tv_sec, (unsigned int) tv.tv_nsec / 1000);
 }
 
@@ -418,6 +422,7 @@ void rtp_shutdown(void) {
 }
 
 void rtp_request_resend(seq_t first, seq_t last) {
+    int cc;
     if (!running)
         die("rtp_request_resend called without active stream!");
 
@@ -431,5 +436,7 @@ void rtp_request_resend(seq_t first, seq_t last) {
     *(unsigned short *)(req+4) = htons(first);  // missed seqnum
     *(unsigned short *)(req+6) = htons(last-first+1);  // count
 
-    sendto(server_sock, req, sizeof(req), 0, (struct sockaddr*)&rtp_client, sizeof(rtp_client));
+    cc = sendto(server_sock, req, sizeof(req), 0, (struct sockaddr*)&rtp_client, sizeof(struct sockaddr));
+    if (cc < 0)
+        die("send packet failed in rtp_request_resend (%d)\n", errno);
 }
