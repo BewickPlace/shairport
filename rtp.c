@@ -290,9 +290,17 @@ static void send_timing_packet(int max_delay_time_ms) {
     *(uint32_t *)(req+24) = htonl((uint32_t)tv.tv_sec);
     *(uint32_t *)(req+28) = htonl((uint32_t)tv.tv_nsec * 0x100000000 / (1000 * 1000 * 1000));
 
-    cc = sendto(timing_sock, req, sizeof(req), 0, (struct sockaddr*)&rtp_timing, sizeof(struct sockaddr));
-    if (cc < 0)
-        die("send packet failed in send_timing_packet (%d)\n", errno);
+#ifdef AF_INET6
+    debug(1, "AF_INET6 defined\n");
+#else
+    debug(1, "AF_INET6 not defined\n");
+#endif
+
+    cc = sendto(timing_sock, req, sizeof(req), 0, (struct sockaddr*)&rtp_timing, sizeof(rtp_client));
+    if (cc < 0){
+        debug(1, "send packet failed in send_timing_packet\n");
+        die("error(%d)\n", errno);
+    }
     debug(1, "Current time s:%lu us:%lu\n", (unsigned int) tv.tv_sec, (unsigned int) tv.tv_nsec / 1000);
 }
 
@@ -436,7 +444,9 @@ void rtp_request_resend(seq_t first, seq_t last) {
     *(unsigned short *)(req+4) = htons(first);  // missed seqnum
     *(unsigned short *)(req+6) = htons(last-first+1);  // count
 
-    cc = sendto(server_sock, req, sizeof(req), 0, (struct sockaddr*)&rtp_client, sizeof(struct sockaddr));
-    if (cc < 0)
-        die("send packet failed in rtp_request_resend (%d)\n", errno);
+    cc = sendto(server_sock, req, sizeof(req), 0, (struct sockaddr*)&rtp_client, sizeof(rtp_client));
+    if (cc < 0){
+        debug(1, "send packet failed in rtp_request_resend\n");
+        die("error(%d)\n", errno);
+    }
 }
