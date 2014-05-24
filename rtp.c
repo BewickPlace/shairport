@@ -296,7 +296,7 @@ static void send_timing_packet(int max_delay_time_ms) {
     debug(1, "AF_INET6 not defined\n");
 #endif
 
-    cc = sendto(timing_sock, req, sizeof(req), 0, (struct sockaddr*)&rtp_timing, sizeof(rtp_client));
+    cc = sendto(timing_sock, req, sizeof(req), 0, (struct sockaddr*)&rtp_timing, sizeof(rtp_timing));
     if (cc < 0){
         debug(1, "send packet failed in send_timing_packet\n");
         die("error(%d)\n", errno);
