@@ -32,6 +32,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
+#include <errno.h>
 #include "config.h"
 #include "common.h"
 #include "player.h"
@@ -39,8 +40,6 @@
 #include <mach/mach.h>
 #include <mach/clock.h>
 #endif
-
-#define NTPCACHESIZE 7
 
 #define NTPCACHESIZE 7
 
@@ -155,8 +154,8 @@ static long long ntp_tsp_to_us(uint32_t timestamp_hi, uint32_t timestamp_lo) {
 static void *rtp_receiver(void *arg) {
     // we inherit the signal mask (SIGUSR1)
     uint8_t packet[2048], *pktp;
-    long long ntp_tsp_sync;
-    unsigned long rtp_tsp_sync;
+    long long ntp_tsp_sync = 0;
+    unsigned long rtp_tsp_sync = 0;
     int sync_mode = NOSYNC;
 
     ssize_t nread;
@@ -199,7 +198,7 @@ static void *rtp_receiver(void *arg) {
             if (plen >= 16) {
                 sync_cfg sync_tag;
                 sync_tag.rtp_tsp = rtp_tsp;
-                if (((strict_rtp && (rtp_tsp == rtp_tsp_sync)) || (!strict_rtp && (type!=0x56) && (sync_mode == NTPSYNC)))){
+                if ((sync_mode == NTPSYNC) && ((strict_rtp && (rtp_tsp == rtp_tsp_sync)) || (!strict_rtp && (type != 0x56)))){
                     debug(2, "Packet for with sync data was sent has arrived (%04X)\n", seqno);
                     sync_tag.ntp_tsp = ntp_tsp_sync;
                     sync_tag.sync_mode = NTPSYNC;
@@ -229,7 +228,7 @@ static void *rtp_receiver(void *arg) {
 
 static void *ntp_receiver(void *arg) {
     // we inherit the signal mask (SIGUSR1)
-    uint8_t packet[2048], *pktp;
+    uint8_t packet[2048];
     struct timespec tv;
 
     ssize_t nread;
@@ -244,7 +243,6 @@ static void *ntp_receiver(void *arg) {
         ssize_t plen = nread;
         uint8_t type = packet[1] & ~0x80;
         if (type == 0x53) {
-            pktp = packet;
             if (plen != 32) {
                 warn("Timing packet with wrong length %d received\n", plen);
                 continue;
@@ -273,12 +271,12 @@ static void *ntp_receiver(void *arg) {
     }
 
     debug(1, "Time receive thread interrupted. terminating.\n");
-    close(timing_sock);
 
     return NULL;
 }
 
 static void send_timing_packet(int max_delay_time_ms) {
+    int cc;
     struct timespec tv;
     char req[32];
     memset(req, 0, sizeof(req));
@@ -292,14 +290,16 @@ static void send_timing_packet(int max_delay_time_ms) {
     *(uint32_t *)(req+24) = htonl((uint32_t)tv.tv_sec);
     *(uint32_t *)(req+28) = htonl((uint32_t)tv.tv_nsec * 0x100000000 / (1000 * 1000 * 1000));
 
-    sendto(timing_sock, req, sizeof(req), 0, (struct sockaddr*)&rtp_timing, sizeof(rtp_timing));
+    cc = sendto(timing_sock, req, sizeof(req), 0, (struct sockaddr*)&rtp_timing, sizeof(rtp_timing));
+    if (cc < 0){
+        debug(1, "send packet failed in send_timing_packet\n");
+        die("error(%d)\n", errno);
+    }
     debug(1, "Current time s:%lu us:%lu\n", (unsigned int) tv.tv_sec, (unsigned int) tv.tv_nsec / 1000);
 }
 
 static void *ntp_sender(void *arg) {
     // we inherit the signal mask (SIGUSR1)
-    ssize_t nread;
-    int loop = 0;
 
     send_timing_packet(100);
     usleep(50000);
@@ -314,7 +314,6 @@ static void *ntp_sender(void *arg) {
     }
 
     debug(1, "Time send thread interrupted. terminating.\n");
-    close(timing_sock);
 
     return NULL;
 }
@@ -420,10 +419,12 @@ void rtp_shutdown(void) {
     pthread_join(rtp_thread, &retval);
     pthread_join(ntp_receive_thread, &retval);
     pthread_join(ntp_send_thread, &retval);
+    close(timing_sock);
     running = 0;
 }
 
 void rtp_request_resend(seq_t first, seq_t last) {
+    int cc;
     if (!running)
         die("rtp_request_resend called without active stream!");
 
@@ -437,5 +438,9 @@ void rtp_request_resend(seq_t first, seq_t last) {
     *(unsigned short *)(req+4) = htons(first);  // missed seqnum
     *(unsigned short *)(req+6) = htons(last-first+1);  // count
 
-    sendto(server_sock, req, sizeof(req), 0, (struct sockaddr*)&rtp_client, sizeof(rtp_client));
+    cc = sendto(server_sock, req, sizeof(req), 0, (struct sockaddr*)&rtp_client, sizeof(rtp_client));
+    if (cc < 0){
+        debug(1, "send packet failed in rtp_request_resend\n");
+        die("error(%d)\n", errno);
+    }
 }

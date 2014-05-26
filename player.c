@@ -421,16 +421,16 @@ static int stuff_buffer(double playback_rate, short *inptr, short *outptr) {
 #define LOSS 850000.0
 
 static void *player_thread_func(void *arg) {
-    int play_samples;
+    int play_samples = frame_size;
     sync_cfg sync_tag;
     long long sync_time;
-    double sync_time_diff;
-    long sync_frames;
+    double sync_time_diff = 0.0;
+    long sync_frames = 0;
     state = BUFFERING;
 
     signed short *inbuf, *outbuf, *resbuf, *silence;
-    resbuf = malloc(OUTFRAME_BYTES(frame_size));
-    silence = malloc(OUTFRAME_BYTES(frame_size));
+    outbuf = resbuf = malloc(OUTFRAME_BYTES(frame_size));
+    inbuf = silence = malloc(OUTFRAME_BYTES(frame_size));
     memset(silence, 0, OUTFRAME_BYTES(frame_size));
     double bf_playback_rate = 1.0;
 
@@ -454,7 +454,6 @@ static void *player_thread_func(void *arg) {
     while (!please_stop) {
         switch (state) {
         case BUFFERING: {
-            int sleep_time;
             inbuf = buffer_get_frame(&sync_tag);
             if (inbuf) {
                 if (sync_tag.sync_mode != NOSYNC) {
