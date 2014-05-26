@@ -270,7 +270,6 @@ static void *ntp_receiver(void *arg) {
     }
 
     debug(1, "Time receive thread interrupted. terminating.\n");
-    close(timing_sock);
 
     return NULL;
 }
@@ -314,7 +313,6 @@ static void *ntp_sender(void *arg) {
     }
 
     debug(1, "Time send thread interrupted. terminating.\n");
-    close(timing_sock);
 
     return NULL;
 }
@@ -420,6 +418,7 @@ void rtp_shutdown(void) {
     pthread_join(rtp_thread, &retval);
     pthread_join(ntp_receive_thread, &retval);
     pthread_join(ntp_send_thread, &retval);
+    close(timing_sock);
     running = 0;
 }
 
