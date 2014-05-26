@@ -290,12 +290,6 @@ static void send_timing_packet(int max_delay_time_ms) {
     *(uint32_t *)(req+24) = htonl((uint32_t)tv.tv_sec);
     *(uint32_t *)(req+28) = htonl((uint32_t)tv.tv_nsec * 0x100000000 / (1000 * 1000 * 1000));
 
-#ifdef AF_INET6
-    debug(1, "AF_INET6 defined\n");
-#else
-    debug(1, "AF_INET6 not defined\n");
-#endif
-
     cc = sendto(timing_sock, req, sizeof(req), 0, (struct sockaddr*)&rtp_timing, sizeof(rtp_timing));
     if (cc < 0){
         debug(1, "send packet failed in send_timing_packet\n");
