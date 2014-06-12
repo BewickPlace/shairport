@@ -157,9 +157,16 @@ static void *rtp_receiver(void *arg) {
     uint8_t packet[2048], *pktp;
     long long ntp_tsp_sync = 0;
     unsigned long rtp_tsp_sync = 0;
-    int sync_mode = NOSYNC;
-
+    int sync_mode;
+    sync_cfg sync_tag, no_tag;
+    sync_cfg * pkt_tag;
+    int sync_fresh = 0;
     ssize_t nread;
+
+    no_tag.rtp_tsp = 0;
+    no_tag.ntp_tsp = 0;
+    no_tag.sync_mode = NOSYNC;
+
     while (1) {
         if (please_shutdown)
             break;
@@ -175,11 +182,12 @@ static void *rtp_receiver(void *arg) {
                 continue;
             }
 
-            rtp_tsp_sync = ntohl(*(uint32_t *)(packet+16));
-            debug(2, "Sync packet rtp_tsp %lu\n", rtp_tsp_sync);
-            ntp_tsp_sync = ntp_tsp_to_us(ntohl(*(uint32_t *)(packet+8)), ntohl(*(uint32_t *)(packet+12)));
-            debug(2, "Sync packet ntp_tsp %lld\n", ntp_tsp_sync);
-            sync_mode = NTPSYNC;
+            sync_tag.rtp_tsp = ntohl(*(uint32_t *)(packet+16));
+            debug(3, "Sync packet rtp_tsp %lu\n", sync_tag.rtp_tsp);
+            sync_tag.ntp_tsp = ntp_tsp_to_us(ntohl(*(uint32_t *)(packet+8)), ntohl(*(uint32_t *)(packet+12)));
+            debug(3, "Sync packet ntp_tsp %lld\n", sync_tag.ntp_tsp);
+            sync_tag.sync_mode = NTPSYNC;
+            sync_fresh = 1;
             continue;
         }
         if (type == 0x60 || type == 0x56) {   // audio data / resend
@@ -197,18 +205,18 @@ static void *rtp_receiver(void *arg) {
 
             // check if packet contains enough content to be reasonable
             if (plen >= 16) {
-                sync_cfg sync_tag;
-                sync_tag.rtp_tsp = rtp_tsp;
-                if ((sync_mode == NTPSYNC) && ((strict_rtp && (rtp_tsp == rtp_tsp_sync)) || (!strict_rtp && (type != 0x56)))){
+                // strict -> find a rtp match, this might happen on resend packets, or,
+                // in weird network circumstances, even more than once.
+                // non-strickt -> just stick it to the first audio packet, _once_
+                if ((strict_rtp && (rtp_tsp == sync_tag.rtp_tsp))
+                        || (!strict_rtp && sync_fresh && (type == 0x60))) {
                     debug(2, "Packet for with sync data was sent has arrived (%04X)\n", seqno);
-                    sync_tag.ntp_tsp = ntp_tsp_sync;
-                    sync_tag.sync_mode = NTPSYNC;
-                    if (!strict_rtp)
-                        sync_mode = NOSYNC;
+                    pkt_tag = &sync_tag;
+                    sync_fresh = 0;
                 } else
-                    sync_tag.sync_mode = NOSYNC;
+                    pkt_tag = &no_tag;
 
-                player_put_packet(seqno, sync_tag, pktp, plen);
+                player_put_packet(seqno, *pkt_tag, pktp, plen);
                 continue;
             }
             if (type == 0x56 && seqno == 0) {
