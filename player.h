@@ -7,6 +7,7 @@
 #define NOSYNC 0
 #define NTPSYNC 1
 #define RTPSYNC 2
+#define E_NTPSYNC 3
 
 typedef struct {
     long long ntp_tsp;

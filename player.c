@@ -254,8 +254,15 @@ void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
     if (abuf) {
         alac_decode(abuf->data, data, len);
         abuf->sync.rtp_tsp = sync_tag.rtp_tsp;
-        abuf->sync.ntp_tsp = sync_tag.ntp_tsp;
-        abuf->sync.sync_mode = sync_tag.sync_mode;
+        // sync packets with extension bit seem to be one audio packet off:
+        // if the extension bit was set, pull back the ntp time by one packet's time
+        if (sync_tag.sync_mode == E_NTPSYNC) {
+            abuf->sync.ntp_tsp = sync_tag.ntp_tsp - (long long)frame_size * 1000000LL / (long long)sampling_rate;
+            abuf->sync.sync_mode = NTPSYNC;
+        } else {
+            abuf->sync.ntp_tsp = sync_tag.ntp_tsp;
+            abuf->sync.sync_mode = sync_tag.sync_mode;
+        }
         abuf->ready = 1;
     }
 
