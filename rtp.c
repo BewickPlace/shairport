@@ -186,7 +186,8 @@ static void *rtp_receiver(void *arg) {
             debug(3, "Sync packet rtp_tsp %lu\n", sync_tag.rtp_tsp);
             sync_tag.ntp_tsp = ntp_tsp_to_us(ntohl(*(uint32_t *)(packet+8)), ntohl(*(uint32_t *)(packet+12)));
             debug(3, "Sync packet ntp_tsp %lld\n", sync_tag.ntp_tsp);
-            sync_tag.sync_mode = NTPSYNC;
+            // check if extension bit is set; this will be the case for the first sync
+            sync_tag.sync_mode = ((packet[0] & 0x10) ? E_NTPSYNC : NTPSYNC);
             sync_fresh = 1;
             continue;
         }
