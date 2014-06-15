@@ -49,6 +49,7 @@ static int please_shutdown;
 
 static SOCKADDR rtp_client;
 static SOCKADDR rtp_timing;
+static socklen_t addrlen;
 static int server_sock;
 static int timing_sock;
 static pthread_t rtp_thread;
@@ -156,9 +157,16 @@ static void *rtp_receiver(void *arg) {
     uint8_t packet[2048], *pktp;
     long long ntp_tsp_sync = 0;
     unsigned long rtp_tsp_sync = 0;
-    int sync_mode = NOSYNC;
-
+    int sync_mode;
+    sync_cfg sync_tag, no_tag;
+    sync_cfg * pkt_tag;
+    int sync_fresh = 0;
     ssize_t nread;
+
+    no_tag.rtp_tsp = 0;
+    no_tag.ntp_tsp = 0;
+    no_tag.sync_mode = NOSYNC;
+
     while (1) {
         if (please_shutdown)
             break;
@@ -174,11 +182,13 @@ static void *rtp_receiver(void *arg) {
                 continue;
             }
 
-            rtp_tsp_sync = ntohl(*(uint32_t *)(packet+16));
-            debug(2, "Sync packet rtp_tsp %lu\n", rtp_tsp_sync);
-            ntp_tsp_sync = ntp_tsp_to_us(ntohl(*(uint32_t *)(packet+8)), ntohl(*(uint32_t *)(packet+12)));
-            debug(2, "Sync packet ntp_tsp %lld\n", ntp_tsp_sync);
-            sync_mode = NTPSYNC;
+            sync_tag.rtp_tsp = ntohl(*(uint32_t *)(packet+16));
+            debug(3, "Sync packet rtp_tsp %lu\n", sync_tag.rtp_tsp);
+            sync_tag.ntp_tsp = ntp_tsp_to_us(ntohl(*(uint32_t *)(packet+8)), ntohl(*(uint32_t *)(packet+12)));
+            debug(3, "Sync packet ntp_tsp %lld\n", sync_tag.ntp_tsp);
+            // check if extension bit is set; this will be the case for the first sync
+            sync_tag.sync_mode = ((packet[0] & 0x10) ? E_NTPSYNC : NTPSYNC);
+            sync_fresh = 1;
             continue;
         }
         if (type == 0x60 || type == 0x56) {   // audio data / resend
@@ -196,18 +206,18 @@ static void *rtp_receiver(void *arg) {
 
             // check if packet contains enough content to be reasonable
             if (plen >= 16) {
-                sync_cfg sync_tag;
-                sync_tag.rtp_tsp = rtp_tsp;
-                if ((sync_mode == NTPSYNC) && ((strict_rtp && (rtp_tsp == rtp_tsp_sync)) || (!strict_rtp && (type != 0x56)))){
+                // strict -> find a rtp match, this might happen on resend packets, or,
+                // in weird network circumstances, even more than once.
+                // non-strickt -> just stick it to the first audio packet, _once_
+                if ((strict_rtp && (rtp_tsp == sync_tag.rtp_tsp))
+                        || (!strict_rtp && sync_fresh && (type == 0x60))) {
                     debug(2, "Packet for with sync data was sent has arrived (%04X)\n", seqno);
-                    sync_tag.ntp_tsp = ntp_tsp_sync;
-                    sync_tag.sync_mode = NTPSYNC;
-                    if (!strict_rtp)
-                        sync_mode = NOSYNC;
+                    pkt_tag = &sync_tag;
+                    sync_fresh = 0;
                 } else
-                    sync_tag.sync_mode = NOSYNC;
+                    pkt_tag = &no_tag;
 
-                player_put_packet(seqno, sync_tag, pktp, plen);
+                player_put_packet(seqno, *pkt_tag, pktp, plen);
                 continue;
             }
             if (type == 0x56 && seqno == 0) {
@@ -221,7 +231,6 @@ static void *rtp_receiver(void *arg) {
     }
 
     debug(1, "RTP thread interrupted. terminating.\n");
-    close(server_sock);
 
     return NULL;
 }
@@ -275,50 +284,45 @@ static void *ntp_receiver(void *arg) {
     return NULL;
 }
 
-static void send_timing_packet(int max_delay_time_ms) {
+static void *ntp_sender(void *arg) {
+    // we inherit the signal mask (SIGUSR1)
+    int i = 0;
     int cc;
     struct timespec tv;
     char req[32];
     memset(req, 0, sizeof(req));
 
-    // todo: randomize time at which to send timing packets to avoid timing floods at the client
-    req[0] = 0x80;
-    req[1] = 0x52|0x80;  // Apple 'ntp request'
-    *(uint16_t *)(req+2) = htons(7);  // seq no, needs to be 7 or iTunes won't respond
-
-    get_current_time(&tv);
-    *(uint32_t *)(req+24) = htonl((uint32_t)tv.tv_sec);
-    *(uint32_t *)(req+28) = htonl((uint32_t)tv.tv_nsec * 0x100000000 / (1000 * 1000 * 1000));
-
-    cc = sendto(timing_sock, req, sizeof(req), 0, (struct sockaddr*)&rtp_timing, sizeof(rtp_timing));
-    if (cc < 0){
-        debug(1, "send packet failed in send_timing_packet\n");
-        die("error(%d)\n", errno);
-    }
-    debug(1, "Current time s:%lu us:%lu\n", (unsigned int) tv.tv_sec, (unsigned int) tv.tv_nsec / 1000);
-}
-
-static void *ntp_sender(void *arg) {
-    // we inherit the signal mask (SIGUSR1)
-
-    send_timing_packet(100);
-    usleep(50000);
-    send_timing_packet(100);
-    usleep(50000);
-
     while (1) {
+        // at startup, we send more timing request to fill up the cache
         if (please_shutdown)
             break;
-        sleep(3);
-        send_timing_packet(100);
+        if (i<2){
+            i++;
+            usleep(50000);
+        } else
+            sleep(3);
+        // todo: randomize time at which to send timing packets to avoid timing floods at the client
+        req[0] = 0x80;
+        req[1] = 0x52|0x80;  // Apple 'ntp request'
+        *(uint16_t *)(req+2) = htons(7);  // seq no, needs to be 7 or iTunes won't respond
+
+        get_current_time(&tv);
+        *(uint32_t *)(req+24) = htonl((uint32_t)tv.tv_sec);
+        *(uint32_t *)(req+28) = htonl((uint32_t)tv.tv_nsec * 0x100000000 / (1000 * 1000 * 1000));
+
+        cc = sendto(timing_sock, req, sizeof(req), 0, (struct sockaddr*)&rtp_timing, addrlen);
+        if (cc < 0){
+            debug(1, "send packet failed in send_timing_packet\n");
+            die("error(%d)\n", errno);
+        }
+        debug(1, "Current time s:%lu us:%lu\n", (unsigned int) tv.tv_sec, (unsigned int) tv.tv_nsec / 1000);
     }
 
     debug(1, "Time send thread interrupted. terminating.\n");
 
     return NULL;
 }
-
-static int bind_port(SOCKADDR *remote, int *sock) {
+static struct addrinfo *get_address_info(SOCKADDR *remote) {
     struct addrinfo hints, *info;
 
     memset(&hints, 0, sizeof(hints));
@@ -331,12 +335,16 @@ static int bind_port(SOCKADDR *remote, int *sock) {
     if (ret < 0)
         die("failed to get usable addrinfo?! %s", gai_strerror(ret));
 
+    return info;
+}
+
+static int bind_port(struct addrinfo *info, int *sock) {
+    int ret;
+
     if (sock == NULL)
         die("socket is NULL");
-    *sock = socket(remote->SAFAMILY, SOCK_DGRAM, IPPROTO_UDP);
+    *sock = socket(info->ai_family, SOCK_DGRAM, IPPROTO_UDP);
     ret = bind(*sock, info->ai_addr, info->ai_addrlen);
-
-    freeaddrinfo(info);
 
     if (ret < 0)
         die("could not bind a UDP port!");
@@ -361,16 +369,16 @@ static int bind_port(SOCKADDR *remote, int *sock) {
 
 
 int rtp_setup(SOCKADDR *remote, int *cport, int *tport) {
-    int *sock;
+    // we only create two sockets instead of three, combining control and data
+    // allows for one, simpler rtp receive thread
+    int server_port;
+    struct addrinfo *info;
 
     if (running)
         die("rtp_setup called with active stream!");
 
-    sock = malloc(sizeof(sock));
     memcpy(&rtp_client, remote, sizeof(rtp_client));
     memcpy(&rtp_timing, remote, sizeof(rtp_timing));
-    reset_ntp_cache();
-
 #ifdef AF_INET6
     if (rtp_client.SAFAMILY == AF_INET6) {
         struct sockaddr_in6 *sa6 = (struct sockaddr_in6*)&rtp_client;
@@ -384,17 +392,20 @@ int rtp_setup(SOCKADDR *remote, int *cport, int *tport) {
         sa->sin_port = htons(*cport);
         struct sockaddr_in *sa_t = (struct sockaddr_in*)&rtp_timing;
         sa_t->sin_port = htons(*tport);
-        //char str[32];
-        //todo print dump of remote
     }
 
-    int server_port = bind_port(remote, sock);
-    *cport = server_port;
-    server_sock = *sock;
-    *tport = bind_port(remote, sock);
-    timing_sock = *sock;
+    // since we create sockets all alike the remote's, the address length
+    // is equal for all
+    info = get_address_info(remote);
+    addrlen = info->ai_addrlen;
 
+    *cport = bind_port(info, &server_sock);
+    server_port = *cport;
+    *tport = bind_port(info, &timing_sock);
+    freeaddrinfo(info);
     debug(1, "rtp listening on dataport %d, controlport %d \n", server_port, *cport);
+
+    reset_ntp_cache();
 
     please_shutdown = 0;
     pthread_create(&rtp_thread, NULL, &rtp_receiver, NULL);
@@ -402,7 +413,6 @@ int rtp_setup(SOCKADDR *remote, int *cport, int *tport) {
     pthread_create(&ntp_send_thread, NULL, &ntp_sender, NULL);
 
     running = 1;
-    free(sock);
     return server_port;
 }
 
@@ -419,6 +429,7 @@ void rtp_shutdown(void) {
     pthread_join(rtp_thread, &retval);
     pthread_join(ntp_receive_thread, &retval);
     pthread_join(ntp_send_thread, &retval);
+    close(server_sock);
     close(timing_sock);
     running = 0;
 }
@@ -438,7 +449,7 @@ void rtp_request_resend(seq_t first, seq_t last) {
     *(unsigned short *)(req+4) = htons(first);  // missed seqnum
     *(unsigned short *)(req+6) = htons(last-first+1);  // count
 
-    cc = sendto(server_sock, req, sizeof(req), 0, (struct sockaddr*)&rtp_client, sizeof(rtp_client));
+    cc = sendto(server_sock, req, sizeof(req), 0, (struct sockaddr*)&rtp_client, addrlen);
     if (cc < 0){
         debug(1, "send packet failed in rtp_request_resend\n");
         die("error(%d)\n", errno);

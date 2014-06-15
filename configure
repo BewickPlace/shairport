@@ -1,13 +1,5 @@
 #!/bin/sh
 
-echo Configuring Shairport
-
-rm -f config.mk config.h
-
-echo "// automatically generated file" > config.h
-
-LDFLAGS="${LDFLAGS} -lm -lpthread -lwiringPi"
-
 export_config()
 {
     echo "#define $1" >> config.h
@@ -19,7 +11,7 @@ export_config()
 check_header()
 {
     echo "#include<$1>" > .header_test.c
-    if gcc -c .header_test.c > /dev/null 2>&1 /dev/null;  then
+    if cc -c .header_test.c > /dev/null 2>&1 /dev/null;  then
         echo "$1 found"
         if [ "$2" ]; then
             export_config $2
@@ -69,25 +61,53 @@ int main(int argc, char **argv){
 }
 FUNC_EOF
 
-    if gcc -c function_test.c > /dev/null 2>&1; then
-    	echo "Found clock_gettime()"
-    	echo -n "Checking if rt lib switch should be added: "
-    	if gcc function_test.c -lrt > /dev/null 2>&1; then
-    		echo "-lrt works, adding"
-    		LDFLAGS="${LDFLAGS} -lrt"
-    	else
-    		echo "-lrt not found, won't add"
-    	fi
+    if cc -c function_test.c > /dev/null 2>&1 /dev/null; then
+        echo "Found clock_gettime()"
+        echo -n "Checking if rt lib switch should be added: "
+        if cc function_test.c -lrt > /dev/null 2>&1 /dev/null; then
+            echo "-lrt works, adding"
+            LDFLAGS="${LDFLAGS} -lrt"
+        else
+            echo "-lrt not found, won't add"
+        fi
     else
-    	echo "Checking if we can use mach time"
-    	check_header mach/mach.h
-    	check_header mach/clock.h
-    	export_config MACH_TIME
+        echo "Checking if we can use mach time"
+        check_header mach/mach.h
+        check_header mach/clock.h
+        export_config MACH_TIME
     fi
     rm -f function_test.*
 }
 
-do_pkg_config OpenSSL       openssl
+# Check if command is installed
+check_command()
+{
+if command -v $1 > /dev/null 2>&1; then
+   echo $1 'is installed'
+else
+   echo $1 'is missing, cannot continue'
+   exit 1
+fi
+}
+
+echo Configuring Shairport
+rm -f config.mk config.h
+
+# First check if the tools configure needs are installed
+check_command pkg-config
+check_command cc
+
+echo "// automatically generated file" > config.h
+LDFLAGS="${LDFLAGS} -lm -lpthread -lwiringPi"
+
+# On FreeBSD, OpenSSH is always there, but no .pc file is installed,
+# so pkg-config does not report it
+if [ `uname` = 'FreeBSD' ]; then
+   echo "FreeBSD machine, assuming OpenSSL is there"
+   LDFLAGS="${LDFLAGS} -lssl -lcrypto"
+else
+   do_pkg_config OpenSSL       openssl
+fi
 do_pkg_config libao         ao              CONFIG_AO
 do_pkg_config PulseAudio    libpulse-simple CONFIG_PULSE
 do_pkg_config ALSA          alsa            CONFIG_ALSA

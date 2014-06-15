@@ -381,6 +381,8 @@ static void handle_teardown(rtsp_conn_info *conn,
 
 static void handle_flush(rtsp_conn_info *conn,
                          rtsp_message *req, rtsp_message *resp) {
+    // the "RTP-Info" header tells us what the seqno and rtptime of the next
+    // audio packet will be, should playback resume
     int seq;
     unsigned long rtp_tsp;
     unsigned long rtptime;
@@ -463,6 +465,9 @@ cleanup_handle_setup:
 
 static void handle_record(rtsp_conn_info *conn,
                          rtsp_message *req, rtsp_message *resp) {
+    // most clients will add a "RTP-Info" header, so we know the first
+    // audio packet's seqno and rtptime.
+    // if there's no "RTP-Info" header, we go into a loose RTP mode
     int seq = -1;
     unsigned long rtptime = 0;
     int rtp_mode = 0;
@@ -485,6 +490,7 @@ static void handle_record(rtsp_conn_info *conn,
     rtp_record(rtp_mode);
     player_flush(seq, rtptime);
 
+    // note: it is assumed we're supposed to return the delay in ms
     char *resphdr = malloc(10);
     sprintf(resphdr, "%d", config.delay/1000);
     debug(1, "Reporting %sms delay\n", resphdr);
@@ -796,8 +802,8 @@ respond:
     if (conn->fd > 0)
         close(conn->fd);
     if (rtsp_playing()) {
-        rtp_shutdown();
         player_stop();
+        rtp_shutdown();
         please_shutdown = 0;
         pthread_mutex_unlock(&playing_mutex);
     }

@@ -276,8 +276,15 @@ void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
     if (abuf) {
         alac_decode(abuf->data, data, len);
         abuf->sync.rtp_tsp = sync_tag.rtp_tsp;
-        abuf->sync.ntp_tsp = sync_tag.ntp_tsp;
-        abuf->sync.sync_mode = sync_tag.sync_mode;
+        // sync packets with extension bit seem to be one audio packet off:
+        // if the extension bit was set, pull back the ntp time by one packet's time
+        if (sync_tag.sync_mode == E_NTPSYNC) {
+            abuf->sync.ntp_tsp = sync_tag.ntp_tsp - (long long)frame_size * 1000000LL / (long long)sampling_rate;
+            abuf->sync.sync_mode = NTPSYNC;
+        } else {
+            abuf->sync.ntp_tsp = sync_tag.ntp_tsp;
+            abuf->sync.sync_mode = sync_tag.sync_mode;
+        }
         abuf->ready = 1;
     }
 
@@ -455,6 +462,7 @@ static void *player_thread_func(void *arg) {
         switch (state) {
         case BUFFERING: {
             inbuf = buffer_get_frame(&sync_tag);
+            // as long as the buffer keeps returning NULL, we assume it is still filling up
             if (inbuf) {
                 if (sync_tag.sync_mode != NOSYNC) {
                     // figure out how much silence to insert before playback starts
@@ -538,6 +546,8 @@ static void *player_thread_func(void *arg) {
         config.output->play(outbuf, play_samples);
     }
 
+    free(resbuf);
+    free(silence);
     return 0;
 }
 
@@ -566,6 +576,8 @@ unsigned long player_flush(int seqno, unsigned long rtp_tsp) {
     ab_resync();
     ab_write = seqno;
     ab_read = seqno;
+    // a negative seqno mean the client did not supply one, so we will
+    // treat the first audio packet that comes along, as the first in the audio stream
     ab_synced = (seqno < 0 ? SIGNALLOSS : UNSYNC);
     pthread_mutex_unlock(&ab_mutex);
     return result;
@@ -590,6 +602,8 @@ int player_play(stream_cfg *stream) {
     please_stop = 0;
     command_start();
     config.output->start(sampling_rate);
+    // generic outputs cannot report the delay, so we estimate the buffer depth
+    // at startup and hope for the best
     if (!config.output->get_delay) {
         config.output->get_delay = audio_get_delay;
         audio_estimate_delay(config.output);
