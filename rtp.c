@@ -296,12 +296,7 @@ static void *ntp_sender(void *arg) {
         // at startup, we send more timing request to fill up the cache
         if (please_shutdown)
             break;
-        if (i<2){
-            i++;
-            usleep(50000);
-        } else
-            sleep(3);
-        // todo: randomize time at which to send timing packets to avoid timing floods at the client
+
         req[0] = 0x80;
         req[1] = 0x52|0x80;  // Apple 'ntp request'
         *(uint16_t *)(req+2) = htons(7);  // seq no, needs to be 7 or iTunes won't respond
@@ -316,6 +311,12 @@ static void *ntp_sender(void *arg) {
             die("error(%d)\n", errno);
         }
         debug(1, "Current time s:%lu us:%lu\n", (unsigned int) tv.tv_sec, (unsigned int) tv.tv_nsec / 1000);
+        // todo: randomize time at which to send timing packets to avoid timing floods at the client
+        if (i<2){
+            i++;
+            usleep(50000);
+        } else
+            sleep(3);
     }
 
     debug(1, "Time send thread interrupted. terminating.\n");
