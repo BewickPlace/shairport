@@ -87,7 +87,8 @@ void usage(char *progname) {
     printf("    -h, --help          show this help\n");
     printf("    -p, --port=PORT     set RTSP listening port\n");
     printf("    -a, --name=NAME     set advertised name\n");
-    printf("    -t TIME             set how much audio is delayed.\n");
+    printf("    -k, --password=PW   require password to stream audio\n");
+    printf("    -t, --delay=TIME    set by how much audio is delayed.\n");
     printf("                        This value is in ms; default %d\n", config.delay/1000);
     printf("    -d, --daemon        fork (daemonise). The PID of the child process is\n");
     printf("                        written to stdout, unless a pidfile is used.\n");
@@ -102,7 +103,7 @@ void usage(char *progname) {
     printf("    -w, --wait-cmd          block while the shell command(s) run\n");
 
     printf("    -o, --output=BACKEND    select audio output method\n");
-    printf("    -m, --mdns=BACKEND      force the use of BACKEND to advertize the service\n");
+    printf("    -m, --mdns=BACKEND      force the use of BACKEND to advertise the service\n");
     printf("                            if no mdns provider is specified,\n");
     printf("                            shairport tries them all until one works.\n");
 
@@ -121,9 +122,11 @@ int parse_options(int argc, char **argv) {
         {"daemon",  no_argument,        NULL, 'd'},
         {"pidfile", required_argument,  NULL, 'P'},
         {"log",     required_argument,  NULL, 'l'},
+        {"delay",   required_argument,  NULL, 't'},
         {"error",   required_argument,  NULL, 'e'},
         {"port",    required_argument,  NULL, 'p'},
         {"name",    required_argument,  NULL, 'a'},
+        {"password",required_argument,  NULL, 'k'},
         {"output",  required_argument,  NULL, 'o'},
         {"on-start",required_argument,  NULL, 'B'},
         {"on-stop", required_argument,  NULL, 'E'},
@@ -134,7 +137,7 @@ int parse_options(int argc, char **argv) {
 
     int opt;
     while ((opt = getopt_long(argc, argv,
-                              "+hdvP:l:e:p:a:o:b:t:B:E:m:",
+                              "+hdvP:l:e:p:a:k:o:t:B:E:wm:",
                               long_options, NULL)) > 0) {
         switch (opt) {
             default:
@@ -155,6 +158,9 @@ int parse_options(int argc, char **argv) {
                 break;
             case 'o':
                 config.output_name = optarg;
+                break;
+            case 'k':
+                config.password = optarg;
                 break;
             case 't':
                 config.delay = atoi(optarg) * 1000;

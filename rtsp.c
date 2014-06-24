@@ -418,49 +418,39 @@ static void handle_flush(rtsp_conn_info *conn,
 
 static void handle_setup(rtsp_conn_info *conn,
                          rtsp_message *req, rtsp_message *resp) {
-    int *cport;
-    int *tport;
+    int cport, tport;
     char *hdr = msg_get_header(req, "Transport");
     if (!hdr)
         return;
-    debug(1, "Transport:%s\n", hdr);
 
     char *p;
-    cport = malloc(sizeof(cport));
-    tport = malloc(sizeof(tport));
     p = strstr(hdr, "control_port=");
     if (!p)
-        goto cleanup_handle_setup;
+        return;
     p = strchr(p, '=') + 1;
-    *cport = atoi(p);
+    cport = atoi(p);
 
     p = strstr(hdr, "timing_port=");
     if (!p)
-        goto cleanup_handle_setup;
+        return;
     p = strchr(p, '=') + 1;
-    *tport = atoi(p);
+    tport = atoi(p);
 
     rtsp_take_player();
-    int sport = rtp_setup(&conn->remote, cport, tport);
+    int sport = rtp_setup(&conn->remote, &cport, &tport);
     if (!sport)
-        goto cleanup_handle_setup;
-    debug(1,"starting player_play\n");
-    digitalWrite(11, 0);	/* On Set-up:	Turn Amplifier ON - disable sleep */
+        return;
 
+    digitalWrite(11, 0);	/* On Set-up:	Turn Amplifier ON - disable sleep */
     player_play(&conn->stream);
 
-    char *resphdr = malloc(strlen(hdr) + 40);
-    sprintf(resphdr, "%s;server_port=%d;control_port=%d;timing_port=%d",
-            "RTP/AVP/UDP;unicast;interleaved=0-1;mode=record", sport, *cport, *tport);
-
+    char *resphdr = malloc(strlen(hdr) + 20);
+    sprintf(resphdr, "%s;server_port=%d;control_port=%d;timing_port=%d", "RTP/AVP/UDP;unicast;interleaved=0-1;mode=record", sport, cport, tport);
     msg_add_header(resp, "Transport", resphdr);
 
     msg_add_header(resp, "Session", "1");
 
     resp->respcode = 200;
-cleanup_handle_setup:
-    free(cport);
-    free(tport);
 }
 
 static void handle_record(rtsp_conn_info *conn,

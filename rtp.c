@@ -368,8 +368,8 @@ static int bind_port(struct addrinfo *info, int *sock) {
     return sport;
 }
 
-
 int rtp_setup(SOCKADDR *remote, int *cport, int *tport) {
+    // we take the client's cport and tport as input and overwrite them with our own
     // we only create two sockets instead of three, combining control and data
     // allows for one, simpler rtp receive thread
     int server_port;
@@ -404,7 +404,7 @@ int rtp_setup(SOCKADDR *remote, int *cport, int *tport) {
     server_port = *cport;
     *tport = bind_port(info, &timing_sock);
     freeaddrinfo(info);
-    debug(1, "rtp listening on dataport %d, controlport %d \n", server_port, *cport);
+    debug(1, "Rtp listening on dataport %d, controlport %d. Timing port is %d.\n", server_port, *cport, *tport);
 
     reset_ntp_cache();
 

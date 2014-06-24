@@ -1,5 +1,15 @@
 #!/bin/sh
 
+[ -z "${CC}" ] && CC=cc
+
+echo Configuring Shairport
+
+rm -f config.mk config.h
+
+echo "// automatically generated file" > config.h
+
+LDFLAGS="${LDFLAGS} -lm -lpthread -lwiringPi"
+
 export_config()
 {
     echo "#define $1" >> config.h
@@ -11,7 +21,7 @@ export_config()
 check_header()
 {
     echo "#include<$1>" > .header_test.c
-    if cc -c .header_test.c > /dev/null 2>&1 /dev/null;  then
+    if ${CC} ${CFLAGS} ${LDFLAGS} -c .header_test.c > /dev/null 2>&1 /dev/null;  then
         echo "$1 found"
         if [ "$2" ]; then
             export_config $2
@@ -61,10 +71,10 @@ int main(int argc, char **argv){
 }
 FUNC_EOF
 
-    if cc -c function_test.c > /dev/null 2>&1 /dev/null; then
+    if ${CC} ${CFLAGS} ${LDFLAGS} -c function_test.c > /dev/null 2>&1 /dev/null; then
         echo "Found clock_gettime()"
         echo -n "Checking if rt lib switch should be added: "
-        if cc function_test.c -lrt > /dev/null 2>&1 /dev/null; then
+        if ${CC} ${CFLAGS} ${LDFLAGS} function_test.c -lrt > /dev/null 2>&1 /dev/null; then
             echo "-lrt works, adding"
             LDFLAGS="${LDFLAGS} -lrt"
         else
@@ -90,17 +100,13 @@ else
 fi
 }
 
-echo Configuring Shairport
-rm -f config.mk config.h
-
 # First check if the tools configure needs are installed
 check_command pkg-config
-check_command cc
+check_command ${CC}
 
-echo "// automatically generated file" > config.h
-LDFLAGS="${LDFLAGS} -lm -lpthread -lwiringPi"
+check_time_function
 
-# On FreeBSD, OpenSSH is always there, but no .pc file is installed,
+# On FreeBSD, OpenSSL is always there, but no .pc file is installed,
 # so pkg-config does not report it
 if [ `uname` = 'FreeBSD' ]; then
    echo "FreeBSD machine, assuming OpenSSL is there"

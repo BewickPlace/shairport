@@ -344,8 +344,7 @@ static short *buffer_get_frame(sync_cfg *sync_tag) {
 
     buf_fill = seq_diff(ab_read, ab_write);
     if (buf_fill < 1) {
-        if (buf_fill < 1)
-            warn("underrun %i (%04X:%04X)", buf_fill, ab_read, ab_write);
+        warn("underrun %i (%04X:%04X)", buf_fill, ab_read, ab_write);
 	ab_resync();
         pthread_mutex_unlock(&ab_mutex);
         return 0;
