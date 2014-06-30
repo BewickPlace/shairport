@@ -128,21 +128,6 @@ static void ab_reset(seq_t from, seq_t to) {
     }
 }
 
-// reset the audio frames in the range to NOT ready
-static void ab_reset(seq_t from, seq_t to) {
-    abuf_t *abuf = 0;
-
-    while (seq_diff(from, to)) {
-        if (seq_diff(from, to) >= BUFFER_FRAMES) {
-           from =  from + BUFFER_FRAMES;
-        } else {
-           abuf = audio_buffer + BUFIDX(from);
-           abuf->ready = 0;
-           from++;
-        }
-    }
-}
-
 // the sequence numbers will wrap pretty often.
 // this returns true if the second arg is after the first
 static inline int seq_order(seq_t a, seq_t b) {
