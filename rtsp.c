@@ -492,6 +492,43 @@ static void handle_record(rtsp_conn_info *conn,
     free(resphdr);
 }
 
+static void handle_record(rtsp_conn_info *conn,
+                         rtsp_message *req, rtsp_message *resp) {
+    // most clients will add a "RTP-Info" header, so we know the first
+    // audio packet's seqno and rtptime.
+    // if there's no "RTP-Info" header, we go into a loose RTP mode
+    int seq = -1;
+    unsigned long rtptime = 0;
+    int rtp_mode = 0;
+    char *hdr = msg_get_header(req, "RTP-Info");
+    if (hdr) {
+        char *p;
+        p = strstr(hdr, "seq=");
+        if (!p)
+            return;
+        p = strchr(p, '=') + 1;
+        seq = atoi(p);
+        p = strstr(hdr, "rtptime=");
+        if (!p)
+            return;
+        p = strchr(p, '=') + 1;
+        rtptime = strtoul(p, NULL, 0);
+        rtp_mode = 1;
+    }
+    debug(1, "Received seq: %04X, rtptime: %lu\n", seq, rtptime);
+    rtp_record(rtp_mode);
+    player_flush(seq, rtptime);
+
+    // note: it is assumed we're supposed to return the delay in ms
+    char *resphdr = malloc(10);
+    sprintf(resphdr, "%d", config.delay/1000);
+    debug(1, "Reporting %sms delay\n", resphdr);
+    msg_add_header(resp, "Audio-Latency", resphdr);
+    resp->respcode = 200;
+
+    free(resphdr);
+}
+
 static void handle_ignore(rtsp_conn_info *conn,
                           rtsp_message *req, rtsp_message *resp) {
     resp->respcode = 200;

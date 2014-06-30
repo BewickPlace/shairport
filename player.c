@@ -128,6 +128,21 @@ static void ab_reset(seq_t from, seq_t to) {
     }
 }
 
+// reset the audio frames in the range to NOT ready
+static void ab_reset(seq_t from, seq_t to) {
+    abuf_t *abuf = 0;
+
+    while (seq_diff(from, to)) {
+        if (seq_diff(from, to) >= BUFFER_FRAMES) {
+           from =  from + BUFFER_FRAMES;
+        } else {
+           abuf = audio_buffer + BUFIDX(from);
+           abuf->ready = 0;
+           from++;
+        }
+    }
+}
+
 // the sequence numbers will wrap pretty often.
 // this returns true if the second arg is after the first
 static inline int seq_order(seq_t a, seq_t b) {
@@ -393,7 +408,7 @@ static int stuff_buffer(double playback_rate, short *inptr, short *outptr) {
 
     if (rand() < p_stuff * RAND_MAX) {
         stuff = playback_rate > 1.0 ? -1 : 1;
-        stuffsamp = rand() % (frame_size - 1);
+        stuffsamp = 1 + (rand() % (frame_size - 2));
     }
 
     pthread_mutex_lock(&vol_mutex);
