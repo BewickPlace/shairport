@@ -289,12 +289,14 @@ void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
     }
 
     pthread_mutex_lock(&ab_mutex);
-    if (ab_synced == UNSYNC && (sync_tag.sync_mode == NTPSYNC)) {
+    if ((abuf) && (ab_synced == UNSYNC) && ((sync_tag.sync_mode == NTPSYNC) || (sync_tag.sync_mode == E_NTPSYNC))) {
        // only stop buffering when the new frame is a timestamp with good sync
-       long long sync_time = get_sync_time(sync_tag.ntp_tsp);
+       long long sync_time = get_sync_time(abuf->sync.ntp_tsp);
        if (sync_time > (config.delay/8)) {
           debug(1, "found good sync (%04X:%04X) sync: %lld\n", ab_read, ab_write, sync_time);
           ab_synced = INSYNC;
+       } else {
+          debug(1, "sync not yet found (%04X:%04X) sync: %lld\n", ab_read, ab_write, sync_time);
        }
        ab_reset(ab_read, seqno);
        ab_read = seqno;
