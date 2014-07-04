@@ -160,7 +160,9 @@ static void start(int sample_rate) {
     device_sample_rate = sample_rate;
 
     int ret, dir = 0;
-    snd_pcm_uframes_t frames = 64;
+    snd_pcm_uframes_t frames = sample_rate / 10;
+    snd_pcm_uframes_t buffer = 0;
+    snd_pcm_uframes_t buffer_max = 0;
     ret = snd_pcm_open(&alsa_handle, alsa_out_dev, SND_PCM_STREAM_PLAYBACK, 0);
     if (ret < 0)
         die("Alsa initialization failed: unable to open pcm device: %s\n", snd_strerror(ret));
@@ -171,10 +173,23 @@ static void start(int sample_rate) {
     snd_pcm_hw_params_set_format(alsa_handle, alsa_params, SND_PCM_FORMAT_S16);
     snd_pcm_hw_params_set_channels(alsa_handle, alsa_params, 2);
     snd_pcm_hw_params_set_rate_near(alsa_handle, alsa_params, (unsigned int *)&sample_rate, &dir);
+
+        // establish the size of the PCM buffer and scale preferred size to fit
+        // with appropriate buffer
+    snd_pcm_hw_params_get_buffer_size_max(alsa_params, &buffer_max);
+    while ((frames > 128) && (frames > (buffer_max/4))) { frames = frames - 64; }
+
     snd_pcm_hw_params_set_period_size_near(alsa_handle, alsa_params, &frames, &dir);
+
+    buffer = frames * 4;
+    snd_pcm_hw_params_set_buffer_size(alsa_handle, alsa_params, buffer);
     ret = snd_pcm_hw_params(alsa_handle, alsa_params);
     if (ret < 0)
         die("unable to set hw parameters: %s\n", snd_strerror(ret));
+
+    snd_pcm_hw_params_get_period_size(alsa_params, &frames, &dir);
+    snd_pcm_hw_params_get_buffer_size(alsa_params, &buffer);
+    debug(1, "ALSA buffer set period/size %d/%d (max: %d)\n", frames, buffer, buffer_max);
 }
 
 static void play(short buf[], int samples) {
