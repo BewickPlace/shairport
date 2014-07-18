@@ -413,7 +413,7 @@ static int stuff_buffer(short *inptr, short *outptr, long *sync_info, double *sy
 
     // maintain tuning statistics for the rate matching algorithm
     if (tuning_samples >= 1000000L) {
-       debug(0, "playback: corrections (stuffs) %3ld ppm, sync err (samples) max/min %3ld:%4ld\n", tuning_stuffs, max_sync_delay, min_sync_delay);
+       debug(1, "playback: corrections (stuffs) %3ld ppm, sync err (samples) max/min %3ld:%4ld\n", tuning_stuffs, max_sync_delay, min_sync_delay);
 
        tuning_samples = 0L;
        tuning_stuffs = 0L;
