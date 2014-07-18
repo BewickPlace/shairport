@@ -52,6 +52,7 @@
 static unsigned char *aesiv;
 static AES_KEY aes;
 static int sampling_rate, frame_size;
+static int ntp_sync_rate;
 
 #define FRAME_BYTES(frame_size) (4*frame_size)
 // maximal resampling shift - conservative
@@ -248,7 +249,7 @@ void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
 	if (seq_diff(ab_write, seqno) >= (BUFFER_FRAMES/4)) {	// packet too far in advance - better to resync
 	   warn("out of range re-sync %04X (%04X:%04X)", seqno, ab_read, ab_write);
 	   ab_resync();
-	   ab_synced = INSYNC;
+	   ab_synced = UNSYNC;
 	   ab_read = seqno;
 	} else if (seq_diff(ab_read,seqno) >= BUFFER_FRAMES) {	// this packet will cause overrun
 								// must handle here to tidy buffer frames skipped
@@ -385,17 +386,49 @@ static short *buffer_get_frame(sync_cfg *sync_tag) {
     return curframe->data;
 }
 
-static int stuff_buffer(double playback_rate, short *inptr, short *outptr) {
+#define TUNE_RATIO 200.0
+#define TUNE_THRESHOLD 5.0
+
+static long tuning_samples = 0L;
+static long tuning_stuffs = 0L;
+static long max_sync_delay = 0L;
+static long min_sync_delay = 0L;
+
+static int stuff_buffer(short *inptr, short *outptr, long *sync_info, double *sync_diff, int *stuff_count) {
     int i;
     int stuffsamp = frame_size;
     int stuff = 0;
+    int frames;
     double p_stuff;
 
-    p_stuff = 1.0 - pow(1.0 - fabs(playback_rate-1.0), frame_size);
+    // use the sync info which contains the total number of samples adrift
+    // to adjust the behaviour of stuff buffer
 
-    if (rand() < p_stuff * RAND_MAX) {
-        stuff = playback_rate > 1.0 ? -1 : 1;
-        stuffsamp = 1 + (rand() % (frame_size - 2));
+    frames =  *sync_info / frame_size;
+    if (frames < -2) {                                       	// if we are more than a couple of full frame behind drop that frame
+        *sync_info = *sync_info + frame_size;
+        debug(3, "stuff buffer, dropped frame\n");
+        return 0;
+    }
+
+    // maintain tuning statistics for the rate matching algorithm
+    if (tuning_samples >= 1000000L) {
+       debug(0, "playback: corrections (stuffs) %3ld ppm, sync err (samples) max/min %3ld:%4ld\n", tuning_stuffs, max_sync_delay, min_sync_delay);
+
+       tuning_samples = 0L;
+       tuning_stuffs = 0L;
+       max_sync_delay = 0L;
+       min_sync_delay = 0L;
+    }
+    tuning_samples = tuning_samples + frame_size;
+    max_sync_delay = (*sync_info > max_sync_delay ? *sync_info : max_sync_delay);
+    min_sync_delay = (*sync_info < min_sync_delay ? *sync_info : min_sync_delay);
+
+    p_stuff = ((*sync_diff * *sync_diff) / TUNE_RATIO);	  	 // Set to add or delete the desired samples one per frame using quadratic to soften impact
+    if ((rand() < (p_stuff * RAND_MAX/(double)ntp_sync_rate)) && // Apply over the next ntp sync period to frames chosen pseudo randomly
+        (p_stuff > TUNE_THRESHOLD)) {	                         // Do not stuff on minor delta
+        stuff = *sync_diff/labs(*sync_diff);                     // this should mean we are adjusting fewer samples - better for bit perfect playback (!)
+        stuffsamp = 1 + (rand() % (frame_size - 2));	         // samples are added/deleted at a pseudo random position in each frame
     }
 
     pthread_mutex_lock(&vol_mutex);
@@ -410,10 +443,14 @@ static int stuff_buffer(double playback_rate, short *inptr, short *outptr) {
             *outptr++ = dithered_vol(((long)inptr[-2] + (long)inptr[0]) >> 1);
             *outptr++ = dithered_vol(((long)inptr[-1] + (long)inptr[1]) >> 1);
             i++;
+            (*stuff_count)++;
+            tuning_stuffs++;
         } else if (stuff==-1) {
             debug(3, "---------\n");
             inptr++;
             inptr++;
+            (*stuff_count)++;
+            tuning_stuffs++;
         }
         for ( ; i<frame_size + stuff; i++) {
             *outptr++ = dithered_vol(*inptr++);
@@ -426,22 +463,22 @@ static int stuff_buffer(double playback_rate, short *inptr, short *outptr) {
 }
 
 //constant first-order filter
-#define ALPHA 0.945
-#define LOSS 850000.0
+#define ALPHA 0.50
 
 static void *player_thread_func(void *arg) {
     int play_samples = frame_size;
+    int ntp_sync_count = 0;
     sync_cfg sync_tag;
     long long sync_time;
-    double sync_time_diff = 0.0;
     long sync_frames = 0;
+    double sync_frames_diff;
+    int stuff_count = 0;
     state = BUFFERING;
 
     signed short *inbuf, *outbuf, *resbuf, *silence;
     outbuf = resbuf = malloc(OUTFRAME_BYTES(frame_size+1));
     inbuf = silence = malloc(OUTFRAME_BYTES(frame_size));
     memset(silence, 0, OUTFRAME_BYTES(frame_size));
-    double bf_playback_rate = 1.0;
 
 
 #ifdef FANCY_RESAMPLING
@@ -502,7 +539,9 @@ static void *player_thread_func(void *arg) {
                 debug(3,"Samples to go before playback start: %d\n", sync_frames);
             } else {
                 outbuf = resbuf;
-                play_samples = stuff_buffer(bf_playback_rate, inbuf, outbuf);
+                sync_frames_diff = 0.0;
+                play_samples = stuff_buffer(inbuf, outbuf, &sync_frames, &sync_frames_diff, &stuff_count);
+                stuff_count = 0;
                 state = PLAYING;
                 debug(1,"Changing player STATE: %d\n", state);
             }
@@ -528,18 +567,18 @@ static void *player_thread_func(void *arg) {
                 play_samples = srcdat.output_frames_gen;
             } else
 #endif
+            ntp_sync_count++;
             if (sync_tag.sync_mode == NTPSYNC) {
+                ntp_sync_rate = ntp_sync_count;				// Establish the number of frames between NTP Syncs
+                ntp_sync_count = 0;
                 //check if we're still in sync.
                 sync_time = get_sync_time(sync_tag.ntp_tsp);
-//                sync_time_diff = (ALPHA * sync_time_diff) + (1.0- ALPHA) * (double)sync_time;
-//                bf_playback_rate = 1.0 - (sync_time_diff / LOSS);
-                sync_time_diff = ((double)sync_time / 1000000.0);
-                sync_time_diff = fmin(sync_time_diff,  0.999999);
-                sync_time_diff = fmax(sync_time_diff, -0.999999);
-                bf_playback_rate = 1.0 - sync_time_diff;
-                debug(2, "Sync timers: fill %i playback_rate %f, sync_time %lld\n", seq_diff(ab_read, ab_write), bf_playback_rate, sync_time);
+                sync_frames = us_to_frames(sync_time);
+                sync_frames_diff = (ALPHA * sync_frames_diff) + ((1.0 - ALPHA) * (double) sync_frames);
+                debug(2, "Sync timers: fill %i, NTP fame rate %d. sync (time) %5lld (samples) %5d:%6.1f, previous stuffs %d\n", seq_diff(ab_read, ab_write), ntp_sync_rate, sync_time, sync_frames, sync_frames_diff, stuff_count);
+                stuff_count = 0;
             }
-            play_samples = stuff_buffer(bf_playback_rate, inbuf, outbuf);
+            play_samples = stuff_buffer(inbuf, outbuf, &sync_frames, &sync_frames_diff, &stuff_count);
             break;
         }
         default:
