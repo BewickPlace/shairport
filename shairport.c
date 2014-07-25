@@ -106,6 +106,15 @@ void usage(char *progname) {
     printf("    -m, --mdns=BACKEND      force the use of BACKEND to advertise the service\n");
     printf("                            if no mdns provider is specified,\n");
     printf("                            shairport tries them all until one works.\n");
+    printf("    -r, --soxr=QUALITY      set libsoxr quality\n");
+    printf("          0 Quick - cubic interpolation\n");
+    printf("          1 Low - 16-bit with larger rolloff (default*)\n");
+    printf("          2 Medium - 16-bit with medium rolloff\n");
+    printf("          4 High - 20-bit quality\n");
+    printf("          6 Very high - 28-bit quality\n");
+    printf("          8 Basic sinc\n");
+    printf("          9 Medium sinc\n");
+    printf("         10 Fast sinc\n");
 
     printf("\n");
     mdns_ls_backends();
@@ -132,12 +141,13 @@ int parse_options(int argc, char **argv) {
         {"on-stop", required_argument,  NULL, 'E'},
         {"wait-cmd",no_argument,        NULL, 'w'},
         {"mdns",    required_argument,  NULL, 'm'},
+        {"soxr",    required_argument,  NULL, 'r'},
         {NULL, 0, NULL, 0}
     };
 
     int opt;
     while ((opt = getopt_long(argc, argv,
-                              "+hdvP:l:e:p:a:k:o:t:B:E:wm:",
+                              "+hdvP:l:e:p:a:k:o:t:B:E:wm:r:",
                               long_options, NULL)) > 0) {
         switch (opt) {
             default:
@@ -185,6 +195,9 @@ int parse_options(int argc, char **argv) {
                 break;
             case 'm':
                 config.mdns_name = optarg;
+                break;
+            case 'r':
+                config.soxr = atoi(optarg);
                 break;
         }
     }
@@ -272,6 +285,7 @@ int main(int argc, char **argv) {
     config.apname = malloc(20 + 100);
     snprintf(config.apname, 20 + 100, "Shairport on %s", hostname);
 
+    config.soxr = 1;	// set default to SOXR_LQ
     // parse arguments into config
     int audio_arg = parse_options(argc, argv);
 
@@ -282,6 +296,10 @@ int main(int argc, char **argv) {
     if (config.daemonise) {
         daemon_init();
     }
+
+    // check soxr quality range
+    if (config.soxr < 0 || config.soxr > 10)
+        die("libsoxr quality range from 0 to 10");
 
     log_setup();
 
@@ -304,5 +322,6 @@ int main(int argc, char **argv) {
 
     // should not.
     shairport_shutdown(1);
+    free(config.apname);
     return 1;
 }

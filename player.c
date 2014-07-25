@@ -37,6 +37,8 @@
 #include <assert.h>
 #include <fcntl.h>
 #include <stdlib.h>
+#include <soxr.h>
+//#include <soxr-lsr.h>
 
 #include "common.h"
 #include "player.h"
@@ -67,6 +69,7 @@ static alac_file *decoder_info;
 static int fancy_resampling = 1;
 static SRC_STATE *src;
 #endif
+static soxr_quality_spec_t qspec;
 
 
 // interthread variables
@@ -386,7 +389,7 @@ static short *buffer_get_frame(sync_cfg *sync_tag) {
     return curframe->data;
 }
 
-#define TUNE_RATIO 200.0
+#define TUNE_RATIO 10.0
 #define TUNE_THRESHOLD 5.0
 
 static long tuning_samples = 0L;
@@ -395,11 +398,11 @@ static long max_sync_delay = 0L;
 static long min_sync_delay = 0L;
 
 static int stuff_buffer(short *inptr, short *outptr, long *sync_info, double *sync_diff, int *stuff_count) {
-    int i;
-    int stuffsamp = frame_size;
+    int i, samp;
     int stuff = 0;
     int frames;
     double p_stuff;
+    signed short *out = outptr;
 
     // use the sync info which contains the total number of samples adrift
     // to adjust the behaviour of stuff buffer
@@ -424,38 +427,73 @@ static int stuff_buffer(short *inptr, short *outptr, long *sync_info, double *sy
     max_sync_delay = (*sync_info > max_sync_delay ? *sync_info : max_sync_delay);
     min_sync_delay = (*sync_info < min_sync_delay ? *sync_info : min_sync_delay);
 
-    p_stuff = ((*sync_diff * *sync_diff) / TUNE_RATIO);	  	 // Set to add or delete the desired samples one per frame using quadratic to soften impact
+    p_stuff = (labs(*sync_diff) / TUNE_RATIO);	  		 // Set to add or delete the desired samples one per frame
     if ((rand() < (p_stuff * RAND_MAX/(double)ntp_sync_rate)) && // Apply over the next ntp sync period to frames chosen pseudo randomly
         (p_stuff > TUNE_THRESHOLD)) {	                         // Do not stuff on minor delta
         stuff = *sync_diff/labs(*sync_diff);                     // this should mean we are adjusting fewer samples - better for bit perfect playback (!)
-        stuffsamp = 1 + (rand() % (frame_size - 2));	         // samples are added/deleted at a pseudo random position in each frame
     }
 
     pthread_mutex_lock(&vol_mutex);
-    for (i=0; i<stuffsamp; i++) {   // the whole frame, if no stuffing
+    memset(outptr, 0, OUTFRAME_BYTES(frame_size));
+    for (i=0; i<frame_size; i++) {   // the whole frame, if no stuffing
         *outptr++ = dithered_vol(*inptr++);
         *outptr++ = dithered_vol(*inptr++);
     };
+    outptr = out;						// Reset the pointers to the start of each buffer
     if (stuff) {
+    	soxr_io_spec_t io_spec;
+  	signed short *src_s_out, *src_s_out_bu;
+
+  	src_s_out_bu = src_s_out = malloc(sizeof(*src_s_out) * 2 * (frame_size + 2)); /* Allocate output buffer. */
+
+    	io_spec.itype = SOXR_INT16_I;
+    	io_spec.otype = SOXR_INT16_I;
+    	io_spec.flags = 0;
+    	io_spec.scale = 1.0;
+    	io_spec.e = 0;
+
+    	size_t odone;
+    	soxr_error_t error = soxr_oneshot(frame_size, frame_size + stuff, 2, /* Rates and # of chans. */
+    	outptr, frame_size, NULL, /* Input. */
+    	src_s_out, frame_size + stuff, &odone, /* Output. */
+    	&io_spec, /* I/O format */
+    	&qspec, NULL); /* Default configuration.*/
+    	if (error)
+    		die("soxr error: %s\n", "error: %s\n", soxr_strerror(error));
+
+    	// assert we have the whole frame
+    	if (odone > frame_size + 1)
+    		die("odone = %d!\n", odone);
+
+        (*stuff_count)++;
+        tuning_stuffs++;
+
+    	// keep last 7 samples
         if (stuff==1) {
             debug(3, "+++++++++\n");
-            // interpolate one sample
-            *outptr++ = dithered_vol(((long)inptr[-2] + (long)inptr[0]) >> 1);
-            *outptr++ = dithered_vol(((long)inptr[-1] + (long)inptr[1]) >> 1);
-            i++;
-            (*stuff_count)++;
-            tuning_stuffs++;
+            // shift samples right
+            for (i=0; i < 7 * 2; i++){
+            	samp = (frame_size * 2) - 1 - i;
+                outptr[samp + 2] = outptr[samp];
+            }
         } else if (stuff==-1) {
             debug(3, "---------\n");
-            inptr++;
-            inptr++;
-            (*stuff_count)++;
-            tuning_stuffs++;
+            // shift samples left
+            for (i=0; i < 7 * 2; i++){
+            	samp = (frame_size * 2) - 7 * 2 + i;
+                outptr[samp - 2] = outptr[samp];
+            }
         }
-        for ( ; i<frame_size + stuff; i++) {
-            *outptr++ = dithered_vol(*inptr++);
-            *outptr++ = dithered_vol(*inptr++);
+    	// keep first 7 samples
+    	outptr = outptr + 7 * 2;
+    	src_s_out = src_s_out + 7 * 2;
+
+    	// copy SOXR buffer keep first & last 7 samples from original
+        for (i=0; i<frame_size + stuff - 7 * 2; i++) {   //
+            *outptr++ = *src_s_out++;
+            *outptr++ = *src_s_out++;
         }
+        free(src_s_out_bu);
     }
     pthread_mutex_unlock(&vol_mutex);
 
@@ -476,7 +514,7 @@ static void *player_thread_func(void *arg) {
     state = BUFFERING;
 
     signed short *inbuf, *outbuf, *resbuf, *silence;
-    outbuf = resbuf = malloc(OUTFRAME_BYTES(frame_size+1));
+    outbuf = resbuf = malloc(OUTFRAME_BYTES(frame_size));
     inbuf = silence = malloc(OUTFRAME_BYTES(frame_size));
     memset(silence, 0, OUTFRAME_BYTES(frame_size));
 
@@ -633,12 +671,13 @@ int player_play(stream_cfg *stream) {
 #ifdef FANCY_RESAMPLING
     init_src();
 #endif
+    qspec = soxr_quality_spec(config.soxr, 0);
 
     sane_buffer_size = (us_to_frames(config.delay)/frame_size) * 3 / 10;
     sane_buffer_size = (sane_buffer_size >= 10 ? sane_buffer_size : 10);
     if (sane_buffer_size > BUFFER_FRAMES)
         die("buffer starting fill %d > buffer size %d", sane_buffer_size, BUFFER_FRAMES);
-    debug(1, "buffer size set to %d\n", sane_buffer_size);
+    debug(1, "soxr quality %d, buffer start size set to %d\n", config.soxr, sane_buffer_size);
 
     please_stop = 0;
     command_start();
