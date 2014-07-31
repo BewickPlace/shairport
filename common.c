@@ -59,9 +59,13 @@ void die(char *format, ...) {
 
 void warn(char *format, ...) {
     time_t rawtime;
+    char newtime[30];
 
-    time( &rawtime);
-    fprintf(stderr,  "%s WARNING: ", strtok(ctime(&rawtime),"\n"));
+    rawtime = time(NULL);
+    ctime_r(&rawtime, newtime);
+    newtime[24] = '\0';
+    fprintf(stderr,  "%s WARNING: ", newtime);
+
     va_list args;
     va_start(args, format);
     vfprintf(stderr, format, args);
@@ -71,11 +75,15 @@ void warn(char *format, ...) {
 
 void debug(int level, char *format, ...) {
     time_t rawtime;
+    char newtime[30];
     if (level > debuglev)
         return;
 
-    time( &rawtime);
-    fprintf(stderr,  "%s DEBUG: ", strtok(ctime(&rawtime),"\n"));
+    rawtime = time(NULL);
+    ctime_r(&rawtime, newtime);
+    newtime[24] = '\0';
+    fprintf(stderr,  "%s DEBUG: ", newtime);
+
     va_list args;
     va_start(args, format);
     vfprintf(stderr, format, args);
