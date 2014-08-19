@@ -272,7 +272,7 @@ void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
            debug(1, "duplicate packet %04X (%04X:%04X)\n", seqno, ab_read, ab_write);
 	}
     } else {    // too late.
-        debug(1, "late packet %04X (%04X:%04X)\n", seqno, ab_read, ab_write);
+        if (seq_diff(ab_read, ab_write)) { debug(1, "late packet %04X (%04X:%04X)\n", seqno, ab_read, ab_write); } // Assume flush if buffer empty - don't debug
     }
     buf_fill = seq_diff(ab_read, ab_write);
     pthread_mutex_unlock(&ab_mutex);
