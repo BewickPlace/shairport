@@ -307,8 +307,9 @@ static void *ntp_sender(void *arg) {
 
         cc = sendto(timing_sock, req, sizeof(req), 0, (struct sockaddr*)&rtp_timing, addrlen);
         if (cc < 0){
-            debug(1, "send packet failed in send_timing_packet\n");
-            die("error(%d)\n", errno);
+            // Warn if network error - then exit loop and wait for host to reset
+            warn("send packet failed in send_timing_packet - network error? (%d)", errno);
+            break;
         }
         debug(1, "Current time s:%lu us:%lu\n", (unsigned int) tv.tv_sec, (unsigned int) tv.tv_nsec / 1000);
         // todo: randomize time at which to send timing packets to avoid timing floods at the client
