@@ -256,19 +256,25 @@ fail:
 
 static rtsp_message * rtsp_read_request(int fd) {
     ssize_t buflen = 512;
-    char *buf = malloc(buflen+1);
+static char *buf = NULL;
 
     rtsp_message *msg = NULL;
 
     ssize_t nread;
-    ssize_t inbuf = 0;
+static  ssize_t inbuf = 0;
+    ssize_t skip_read = inbuf;			// skip first read if already data in message buffer
     int msg_size = -1;
+
+    if (!buf) buf = malloc(buflen+1);
 
     while (msg_size < 0) {
         if (please_shutdown) {
             debug(1, "RTSP shutdown requested\n");
             goto shutdown;
         }
+        if (skip_read) {
+           skip_read = 0;
+        } else {
         nread = read(fd, buf+inbuf, buflen - inbuf);
         if (!nread) {
             debug(1, "RTSP connection closed\n");
@@ -281,6 +287,7 @@ static rtsp_message * rtsp_read_request(int fd) {
             goto shutdown;
         }
         inbuf += nread;
+        }
 
         char *next;
         while (msg_size < 0 && (next = nextline(buf, inbuf))) {
@@ -319,8 +326,18 @@ static rtsp_message * rtsp_read_request(int fd) {
         inbuf += nread;
     }
 
-    msg->contentlength = inbuf;
-    msg->content = buf;
+    msg->contentlength = msg_size;
+    msg->content = NULL;
+    inbuf = inbuf - msg_size;
+    if ((msg_size) && (inbuf)) {				// if extra data in read buffer
+        msg->content = malloc(msg_size+1);			// move message content to new buffer
+        memmove(msg->content, buf, msg_size);
+        memmove(buf, buf+msg_size, inbuf);
+        debug(1, "RTSP copying buf:%d len:%d\n", buf, inbuf);
+    } else if (msg_size) {
+        msg->content = buf;					// otherwise use existing buffer
+        buf = NULL;
+    }
     return msg;
 
 shutdown:
@@ -328,6 +345,8 @@ shutdown:
     if (msg) {
         msg_free(msg);
     }
+    buf = NULL;
+    msg = NULL;
     return NULL;
 }
 
