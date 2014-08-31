@@ -254,14 +254,16 @@ fail:
     return 0;
 }
 
-static rtsp_message * rtsp_read_request(int fd) {
+static rtsp_message * rtsp_read_request(int fd, char **p_buf, ssize_t *p_inbuf) {
     ssize_t buflen = 512;
-static char *buf = NULL;
+    char *buf = *p_buf;;
+    // p_buf and p_inbuf are pointers to persistent versions of the local variables buf & inbuf
+    // these are used to enable multiple messages to be retrieved from a single read buffer
 
     rtsp_message *msg = NULL;
 
     ssize_t nread;
-static  ssize_t inbuf = 0;
+    ssize_t inbuf = *p_inbuf;
     ssize_t skip_read = inbuf;			// skip first read if already data in message buffer
     int msg_size = -1;
 
@@ -338,6 +340,8 @@ static  ssize_t inbuf = 0;
         msg->content = buf;					// otherwise use existing buffer
         buf = NULL;
     }
+    *p_buf = buf;						// Update persistent variables
+    *p_inbuf = inbuf;
     return msg;
 
 shutdown:
@@ -345,8 +349,8 @@ shutdown:
     if (msg) {
         msg_free(msg);
     }
-    buf = NULL;
-    msg = NULL;
+    *p_buf = NULL;
+    *p_inbuf = 0;;
     return NULL;
 }
 
@@ -777,12 +781,15 @@ static void *rtsp_conversation_thread_func(void *pconn) {
     sigemptyset(&set);
     sigaddset(&set, SIGUSR1);
     pthread_sigmask(SIG_UNBLOCK, &set, NULL);
+    // Persistent variables for read buffer
+    char *buf = NULL;
+    ssize_t inbuf = 0;
 
     rtsp_conn_info *conn = pconn;
 
     rtsp_message *req, *resp;
     char *hdr, *auth_nonce = NULL;
-    while ((req = rtsp_read_request(conn->fd))) {
+    while ((req = rtsp_read_request(conn->fd, &buf, &inbuf))) {
         resp = msg_init();
         resp->respcode = 400;
 
