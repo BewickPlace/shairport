@@ -274,7 +274,6 @@ void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
     } else {    // too late.
         if (seq_diff(ab_read, ab_write)) { debug(1, "late packet %04X (%04X:%04X)\n", seqno, ab_read, ab_write); } // Assume flush if buffer empty - don't debug
     }
-    buf_fill = seq_diff(ab_read, ab_write);
     pthread_mutex_unlock(&ab_mutex);
 
     if (abuf) {
@@ -305,6 +304,7 @@ void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
        ab_reset(ab_read, seqno);
        ab_read = seqno;
     }
+    buf_fill = seq_diff(ab_read, ab_write);
     if ((abuf) && (ab_synced == INSYNC) && (ab_buffering) && (buf_fill >= sane_buffer_size)) {
         debug(1, "buffering over. starting play\n");
         ab_buffering = 0;
