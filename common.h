@@ -27,6 +27,7 @@ typedef struct {
     char *mdns_name;
     mdns_backend *mdns;
     int delay;
+    int latency;
     int daemonise;
     char *cmd_start, *cmd_stop;
     int cmd_blocking;
@@ -35,6 +36,11 @@ typedef struct {
     char *errfile;
     unsigned long soxr;
 } shairport_cfg;
+
+// Define Latency baseline time
+#define LATENCY_BASELINE_S	2	// Default latency figure normally provided by iTunes (in seconds)
+#define LATENCY_BASELINE_US	2000000 // and in U seconds
+#define LATENCY_DEFAULT_US      2205000 // Shairport latency for audio sync with Airport Express (in U seconds)
 
 extern int debuglev;
 void die(char *format, ...);

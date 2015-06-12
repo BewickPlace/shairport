@@ -226,7 +226,7 @@ static long us_to_frames(long long us) {
 
 static inline long long get_sync_time(long long ntp_tsp) {
     long long sync_time_est;
-    sync_time_est = (ntp_tsp + config.delay) - (tstp_us() + get_ntp_offset() + config.output->get_delay());
+    sync_time_est = (ntp_tsp + config.latency) - (tstp_us() + get_ntp_offset() + config.output->get_delay());
     return sync_time_est;
 }
 
@@ -295,7 +295,7 @@ void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
     if ((abuf) && (ab_synced == UNSYNC) && ((sync_tag.sync_mode == NTPSYNC) || (sync_tag.sync_mode == E_NTPSYNC))) {
        // only stop buffering when the new frame is a timestamp with good sync
        long long sync_time = get_sync_time(abuf->sync.ntp_tsp);
-       if (sync_time > (config.delay/8)) {
+       if (sync_time > (config.latency/8)) {
           debug(1, "found good sync (%04X:%04X) sync: %lld\n", ab_read, ab_write, sync_time);
           ab_synced = INSYNC;
        } else {
@@ -547,7 +547,7 @@ static void *player_thread_func(void *arg) {
                 } else {
                     // what if first packet(s) is lost?
                     warn("Ouch! first packet has no sync...\n");
-                    sync_frames = us_to_frames(config.delay) - config.output->get_delay();
+                    sync_frames = us_to_frames(config.latency) - config.output->get_delay();
                 }
                 if (sync_frames < 0)
                     sync_frames = 0;
@@ -662,6 +662,18 @@ unsigned long player_flush(int seqno, unsigned long rtp_tsp) {
     return result;
 }
 
+void player_set_latency(long latency_samples) {
+
+    config.latency = (int) (((long long) latency_samples * 1000000LL) / ((long long) sampling_rate));
+    config.latency = config.latency + (config.delay - LATENCY_BASELINE_US);
+    debug(3, "Set latency: delay/latency/samples %d %d %ld\n", config.delay, config.latency, latency_samples);
+
+    sane_buffer_size = (us_to_frames(config.latency)/frame_size) * 3 / 10;
+    sane_buffer_size = (sane_buffer_size >= 10 ? sane_buffer_size : 10);
+    if (sane_buffer_size > BUFFER_FRAMES)
+        die("buffer starting fill %d > buffer size %d", sane_buffer_size, BUFFER_FRAMES);
+}
+
 int player_play(stream_cfg *stream) {
     AES_set_decrypt_key(stream->aeskey, 128, &aes);
     aesiv = stream->aesiv;
@@ -673,10 +685,7 @@ int player_play(stream_cfg *stream) {
 #endif
     qspec = soxr_quality_spec(config.soxr, 0);
 
-    sane_buffer_size = (us_to_frames(config.delay)/frame_size) * 3 / 10;
-    sane_buffer_size = (sane_buffer_size >= 10 ? sane_buffer_size : 10);
-    if (sane_buffer_size > BUFFER_FRAMES)
-        die("buffer starting fill %d > buffer size %d", sane_buffer_size, BUFFER_FRAMES);
+    player_set_latency(LATENCY_BASELINE_S * sampling_rate);
     debug(1, "soxr quality %d, buffer start size set to %d\n", config.soxr, sane_buffer_size);
 
     please_stop = 0;

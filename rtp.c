@@ -157,6 +157,7 @@ static void *rtp_receiver(void *arg) {
     uint8_t packet[2048], *pktp;
     long long ntp_tsp_sync = 0;
     unsigned long rtp_tsp_sync = 0;
+    unsigned long tsp_less_latency = 0;
     int sync_mode;
     sync_cfg sync_tag, no_tag;
     sync_cfg * pkt_tag;
@@ -182,6 +183,7 @@ static void *rtp_receiver(void *arg) {
                 continue;
             }
 
+            tsp_less_latency = ntohl(*(uint32_t *)(packet+4));
             sync_tag.rtp_tsp = ntohl(*(uint32_t *)(packet+16));
             debug(3, "Sync packet rtp_tsp %lu\n", sync_tag.rtp_tsp);
             sync_tag.ntp_tsp = ntp_tsp_to_us(ntohl(*(uint32_t *)(packet+8)), ntohl(*(uint32_t *)(packet+12)));
@@ -189,6 +191,7 @@ static void *rtp_receiver(void *arg) {
             // check if extension bit is set; this will be the case for the first sync
             sync_tag.sync_mode = ((packet[0] & 0x10) ? E_NTPSYNC : NTPSYNC);
             sync_fresh = 1;
+            player_set_latency(sync_tag.rtp_tsp - tsp_less_latency);		// Set audio latency according to details in packet
             continue;
         }
         if (type == 0x60 || type == 0x56) {   // audio data / resend

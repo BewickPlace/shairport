@@ -278,7 +278,8 @@ int main(int argc, char **argv) {
     memset(&config, 0, sizeof(config));
 
     // set defaults
-    config.delay = 2205000; //todo: check with an airport express what this should be
+    config.delay = LATENCY_DEFAULT_US;		// Set default Audio Latency
+    config.latency = LATENCY_DEFAULT_US;
     config.port = 5002;
     char hostname[100];
     gethostname(hostname, 100);
