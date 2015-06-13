@@ -241,6 +241,15 @@ void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
         ab_read = seqno;
         ab_synced = UNSYNC;
     }
+
+    if (seq_diff(ab_read,seqno) >= BUFFER_FRAMES) {		// this packet will cause overrun
+								// must handle here to tidy buffer frames skipped
+	warn("overrun %04X (%04X:%04X)", seqno, ab_read, ab_write);
+	ab_read = seqno - (BUFFER_FRAMES/2);			// restart at a sane distance
+	ab_reset((ab_write - BUFFER_FRAMES), ab_read);		// reset any ready frames in those we've skipped (avoiding wrap around)
+	ab_write = seqno;					// ensure
+    }
+
     debug(3, "packet: ab_write %04X, ab_read %04X, seqno %04X\n", ab_write, ab_read, seqno);
     if (seq_diff(ab_write, seqno) == 0) {                  // expected packet
         abuf = audio_buffer + BUFIDX(seqno);
@@ -254,11 +263,6 @@ void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
 	   ab_resync();
 	   ab_synced = UNSYNC;
 	   ab_read = seqno;
-	} else if (seq_diff(ab_read,seqno) >= BUFFER_FRAMES) {	// this packet will cause overrun
-								// must handle here to tidy buffer frames skipped
-           warn("advance overrun %04X (%04X:%04X)", seqno, ab_read, ab_write);
-           ab_read = seqno - (BUFFER_FRAMES/2);			// restart at a sane distance
-           ab_reset((ab_write - BUFFER_FRAMES), ab_read);	// reset any ready frames in those we've skipped (avoiding wrap around)
 	} else {
            debug(1, "advance packet %04X (%04X:%04X)\n", seqno, ab_read, ab_write);
            if (!ab_buffering) {rtp_request_resend(ab_write, seqno-1);}
