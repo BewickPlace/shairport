@@ -208,7 +208,7 @@ static int msg_handle_line(rtsp_message **pmsg, char *line) {
         *pmsg = msg;
         char *sp, *p;
 
-        debug(1, "received request: %s\n", line);
+        debug(2, "received request: %s\n", line);
 
         p = strtok_r(line, " ", &sp);
         if (!p)
@@ -363,7 +363,7 @@ static void msg_write_response(int fd, rtsp_message *resp) {
     n = snprintf(p, pktfree,
                  "RTSP/1.0 %d %s\r\n", resp->respcode,
                  resp->respcode==200 ? "OK" : "Error");
-    debug(1, "sending response: %s", pkt);
+    debug(2, "sending response: %s", pkt);
     pktfree -= n;
     p += n;
 
