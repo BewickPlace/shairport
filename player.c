@@ -242,9 +242,9 @@ void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
         ab_synced = UNSYNC;
     }
 
-    if (seq_diff(ab_read,seqno) >= BUFFER_FRAMES) {		// this packet will cause overrun
-								// must handle here to tidy buffer frames skipped
-	warn("overrun %04X (%04X:%04X)", seqno, ab_read, ab_write);
+    if ((seq_diff(ab_read,seqno) >= BUFFER_FRAMES) &&		// this packet will cause overrun
+	(seq_order(ab_read,seqno))) {				// must handle here to tidy buffer frames skipped
+	warn("Overrun %04X (%04X:%04X)", seqno, ab_read, ab_write);
 	ab_read = seqno - (BUFFER_FRAMES/2);			// restart at a sane distance
 	ab_reset((ab_write - BUFFER_FRAMES), ab_read);		// reset any ready frames in those we've skipped (avoiding wrap around)
 	ab_write = seqno;					// ensure
