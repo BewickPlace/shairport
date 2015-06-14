@@ -314,7 +314,7 @@ static void *ntp_sender(void *arg) {
             warn("send packet failed in send_timing_packet - network error? (%d)", errno);
             break;
         }
-        debug(1, "Current time s:%lu us:%lu\n", (unsigned int) tv.tv_sec, (unsigned int) tv.tv_nsec / 1000);
+        debug(2, "Current time s:%lu us:%lu\n", (unsigned int) tv.tv_sec, (unsigned int) tv.tv_nsec / 1000);
         // todo: randomize time at which to send timing packets to avoid timing floods at the client
         if (i<2){
             i++;
