@@ -619,6 +619,18 @@ static void *player_thread_func(void *arg) {
                 sync_frames_diff = (ALPHA * sync_frames_diff) + ((1.0 - ALPHA) * (double) sync_frames);
                 debug(2, "Sync timers: fill %i, NTP fame rate %d. sync (time) %5lld (samples) %5d:%6.1f, previous stuffs %d\n", seq_diff(ab_read, ab_write), ntp_sync_rate, sync_time, sync_frames, sync_frames_diff, stuff_count);
                 stuff_count = 0;
+                if ((sync_frames/frame_size) > 2) {			// If we find ourselves playing ahead of sync (often caused by underrun on source)
+									// we need to inject some silence to realign after playing this frame - warn if serious
+		    sync_frames = sync_frames -(sync_frames % frame_size) - (1 * frame_size);
+		    if ((sync_frames/frame_size) > 10) {
+			warn("Injecting %ld frames of silence", sync_frames /frame_size);
+		    } else {
+			debug(0, "Injecting %ld frames of silence\n", sync_frames /frame_size);
+		    }
+                    state = SYNCING;
+                    debug(1,"Changing player STATE: %d\n", state);
+
+		}
             }
             play_samples = stuff_buffer(inbuf, outbuf, &sync_frames, &sync_frames_diff, &stuff_count);
             break;
