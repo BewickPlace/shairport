@@ -631,6 +631,7 @@ static void *player_thread_func(void *arg) {
                     sync_frames -= play_samples;
                     state = SYNCING;
                     debug(1,"Changing player STATE: %d\n", state);
+		    break;						// move directly to play silence
 
 		}
             }
