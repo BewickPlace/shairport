@@ -111,7 +111,10 @@ static pthread_mutex_t ab_mutex = PTHREAD_MUTEX_INITIALIZER;
 static void ab_resync(void) {
     int i;
     for (i=0; i<BUFFER_FRAMES; i++)
+    {
         audio_buffer[i].ready = 0;
+        audio_buffer[i].sync.sync_mode = NOSYNC;
+    }
     ab_synced = SIGNALLOSS;
     ab_buffering = 1;
     state = BUFFERING;
@@ -127,6 +130,7 @@ static void ab_reset(seq_t from, seq_t to) {
         } else {
            abuf = audio_buffer + BUFIDX(from);
            abuf->ready = 0;
+           abuf->sync.sync_mode = NOSYNC;
            from++;
         }
     }
@@ -388,6 +392,7 @@ static short *buffer_get_frame(sync_cfg *sync_tag) {
     sync_tag->rtp_tsp = curframe->sync.rtp_tsp;
     sync_tag->ntp_tsp = curframe->sync.ntp_tsp;
     sync_tag->sync_mode = curframe->sync.sync_mode;
+    curframe->sync.sync_mode = NOSYNC;
     pthread_mutex_unlock(&ab_mutex);
 
     return curframe->data;
