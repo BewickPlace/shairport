@@ -49,10 +49,10 @@ install: shairport
 	install -m 755 -d $(PREFIX)/bin
 	install -m 755 shairport $(PREFIX)/bin/shairport
 ifeq ($(wildcard /etc/shairport.conf),)
-	install -m 766 scripts/shairport.conf /etc/shairport.conf 
+	install -m 666 scripts/shairport.conf /etc/shairport.conf 
 endif
 ifeq ($(wildcard /etc/systemd/system/shairport.service),)
-	install -m 766 scripts/shairport.service /etc/systemd/system/shairport.service
+	install -m 644 scripts/shairport.service /etc/systemd/system/shairport.service
 endif
 
 %.o: %.c $(DEPS)
