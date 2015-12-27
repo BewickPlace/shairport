@@ -91,6 +91,19 @@ static void rtsp_take_player(void) {
     playing_thread = pthread_self();
 }
 
+static int rtsp_take_available_player(void) {
+    if (pthread_mutex_trylock(&playing_mutex)) {		// Take lock if available
+        if (pthread_equal(playing_thread, pthread_self())) {	// Not available do we have it?
+	    return 1;						// Taken  ~ we already have it
+	} else {
+	    return 0;						// Not Taken ~ owned by someone else
+	}
+    } else {
+        playing_thread = pthread_self();			// Taken - we now have it
+	return 1;
+    }
+}
+
 void rtsp_shutdown_stream(void) {
     rtsp_take_player();
     pthread_mutex_unlock(&playing_mutex);
@@ -459,6 +472,7 @@ static void handle_setup(rtsp_conn_info *conn,
     p = strchr(p, '=') + 1;
     tport = atoi(p);
 
+    if (rtsp_take_available_player()) {					// Only take  player if available (not playing)
     rtsp_take_player();
     int sport = rtp_setup(&conn->remote, &cport, &tport);
     if (!sport)
@@ -476,6 +490,9 @@ static void handle_setup(rtsp_conn_info *conn,
     resp->respcode = 200;
 
     free(resphdr);
+    } else {
+    resp->respcode = 453;
+    }
 }
 
 static void handle_record(rtsp_conn_info *conn,
