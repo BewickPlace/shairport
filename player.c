@@ -429,8 +429,8 @@ static int stuff_buffer(short *inptr, short *outptr, long *sync_info, double *sy
 
        tuning_samples = 0L;
        tuning_stuffs = 0L;
-       max_sync_delay = 0L;
-       min_sync_delay = 0L;
+       max_sync_delay = *sync_info;
+       min_sync_delay = *sync_info;
     }
     tuning_samples = tuning_samples + frame_size;
     max_sync_delay = (*sync_info > max_sync_delay ? *sync_info : max_sync_delay);
