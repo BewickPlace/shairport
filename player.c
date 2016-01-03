@@ -398,26 +398,26 @@ static short *buffer_get_frame(sync_cfg *sync_tag) {
     return curframe->data;
 }
 
-#define TUNE_RATIO 10.0
-#define TUNE_THRESHOLD 5.0
+#define TUNE_RATIO 10L
+#define TUNE_THRESHOLD 5L
 
 static long tuning_samples = 0L;
 static long tuning_stuffs = 0L;
 static long max_sync_delay = 0L;
 static long min_sync_delay = 0L;
 
-static int stuff_buffer(short *inptr, short *outptr, long *sync_info, double *sync_diff, int *stuff_count) {
+static int stuff_buffer(short *inptr, short *outptr, long *sync_info, long *sync_diff, int *stuff_count) {
     int i, samp;
     int stuff = 0;
     int frames;
-    double p_stuff;
+    long p_stuff;
     signed short *out = outptr;
 
     // use the sync info which contains the total number of samples adrift
     // to adjust the behaviour of stuff buffer
 
     frames =  *sync_info / frame_size;
-    if (frames < -2) {                                       	// if we are more than a couple of full frame behind drop that frame
+    if (frames < -2) {                                  	// if we are more than a couple of full frame behind drop that frame
         *sync_info = *sync_info + frame_size;
         debug(3, "stuff buffer, dropped frame\n");
         return 0;
@@ -437,7 +437,7 @@ static int stuff_buffer(short *inptr, short *outptr, long *sync_info, double *sy
     min_sync_delay = (*sync_info < min_sync_delay ? *sync_info : min_sync_delay);
 
     p_stuff = (labs(*sync_diff) / TUNE_RATIO);	  		 // Set to add or delete the desired samples one per frame
-    if ((rand() < (p_stuff * RAND_MAX/(double)ntp_sync_rate)) && // Apply over the next ntp sync period to frames chosen pseudo randomly
+    if (((rand()/p_stuff) < (RAND_MAX/(long) ntp_sync_rate)) &&	 // Apply over the next ntp sync period to frames chosen pseudo randomly
         (p_stuff > TUNE_THRESHOLD)) {	                         // Do not stuff on minor delta
         stuff = *sync_diff/labs(*sync_diff);                     // this should mean we are adjusting fewer samples - better for bit perfect playback (!)
     }
@@ -510,7 +510,7 @@ static int stuff_buffer(short *inptr, short *outptr, long *sync_info, double *sy
 }
 
 //constant first-order filter
-#define ALPHA 0.50
+#define ALPHA 5
 
 static void *player_thread_func(void *arg) {
     int play_samples = frame_size;
@@ -518,7 +518,7 @@ static void *player_thread_func(void *arg) {
     sync_cfg sync_tag;
     long long sync_time;
     long sync_frames = 0;
-    double sync_frames_diff;
+    long sync_frames_diff;
     int stuff_count = 0;
     state = BUFFERING;
 
@@ -586,7 +586,7 @@ static void *player_thread_func(void *arg) {
                 debug(3,"Samples to go before playback start: %d\n", sync_frames);
             } else {
                 outbuf = resbuf;
-                sync_frames_diff = 0.0;
+                sync_frames_diff = 0L;
                 play_samples = stuff_buffer(inbuf, outbuf, &sync_frames, &sync_frames_diff, &stuff_count);
                 stuff_count = 0;
                 state = PLAYING;
@@ -621,8 +621,8 @@ static void *player_thread_func(void *arg) {
                 //check if we're still in sync.
                 sync_time = get_sync_time(sync_tag.ntp_tsp);
                 sync_frames = us_to_frames(sync_time);
-                sync_frames_diff = (ALPHA * sync_frames_diff) + ((1.0 - ALPHA) * (double) sync_frames);
-                debug(2, "Sync timers: fill %i, NTP fame rate %d. sync (time) %5lld (samples) %5d:%6.1f, previous stuffs %d\n", seq_diff(ab_read, ab_write), ntp_sync_rate, sync_time, sync_frames, sync_frames_diff, stuff_count);
+                sync_frames_diff = ((ALPHA * sync_frames_diff) + ((10 - ALPHA) * sync_frames))/10;
+                debug(2, "Sync timers: fill %i, NTP fame rate %d. sync (time) %5lld (samples) %5d:%5d, previous stuffs %d\n", seq_diff(ab_read, ab_write), ntp_sync_rate, sync_time, sync_frames, sync_frames_diff, stuff_count);
                 stuff_count = 0;
                 if ((sync_frames/frame_size) > 2) {			// If we find ourselves playing ahead of sync (often caused by underrun on source)
 									// we need to inject some silence to realign before playing this frame - warn if serious
