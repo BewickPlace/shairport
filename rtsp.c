@@ -473,7 +473,6 @@ static void handle_setup(rtsp_conn_info *conn,
     tport = atoi(p);
 
     if (rtsp_take_available_player()) {					// Only take  player if available (not playing)
-    rtsp_take_player();
     int sport = rtp_setup(&conn->remote, &cport, &tport);
     if (!sport)
         return;
