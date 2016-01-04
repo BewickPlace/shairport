@@ -59,8 +59,12 @@ long long ntp_cache[NTPCACHESIZE + 1];
 static int strict_rtp;
 
 void rtp_record(int rtp_mode){
-    debug(2, "Setting strict_rtp to %d\n", rtp_mode);
+    debug(1, "Setting strict_rtp to %d\n", rtp_mode);
     strict_rtp = rtp_mode;
+}
+
+int rtp_strictmode(){
+    return strict_rtp;
 }
 
 static void get_current_time(struct timespec *tsp) {

@@ -417,7 +417,7 @@ static int stuff_buffer(short *inptr, short *outptr, long *sync_info, long *sync
     // to adjust the behaviour of stuff buffer
 
     frames =  *sync_info / frame_size;
-    if (frames < -2) {                                  	// if we are more than a couple of full frame behind drop that frame
+    if ((frames < -5) && (rtp_strictmode())) {			// if we are in Strict mode and more than a couple of full frame behind drop that frame
         *sync_info = *sync_info + frame_size;
         debug(3, "stuff buffer, dropped frame\n");
         return 0;
@@ -624,7 +624,7 @@ static void *player_thread_func(void *arg) {
                 sync_frames_diff = ((ALPHA * sync_frames_diff) + ((10 - ALPHA) * sync_frames))/10;
                 debug(2, "Sync timers: fill %i, NTP fame rate %d. sync (time) %5lld (samples) %5d:%5d, previous stuffs %d\n", seq_diff(ab_read, ab_write), ntp_sync_rate, sync_time, sync_frames, sync_frames_diff, stuff_count);
                 stuff_count = 0;
-                if ((sync_frames/frame_size) > 2) {			// If we find ourselves playing ahead of sync (often caused by underrun on source)
+                if (((sync_frames/frame_size) > 5) && (rtp_strictmode())) { // If we are in Strict mode and find ourselves playing ahead of sync (often caused by underrun on source)
 									// we need to inject some silence to realign before playing this frame - warn if serious
 		    if ((sync_frames/frame_size) > 10) {
 			warn("Injecting %ld frames of silence", sync_frames /frame_size);
