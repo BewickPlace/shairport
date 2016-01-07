@@ -42,7 +42,7 @@
 #endif
 
 #define NTPCACHESIZE 12
-#define NTPRANGE     2000LL
+#define NTPRANGE     5000LL
 #define NTPSKIPLIMIT 20
 
 // only one RTP session can be active at a time.
