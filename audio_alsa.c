@@ -190,8 +190,10 @@ static void start(int sample_rate) {
 
 static void play(short buf[], int samples) {
     int err = snd_pcm_writei(alsa_handle, (char*)buf, samples);
-    if (err < 0)
-        err = snd_pcm_recover(alsa_handle, err, 0);
+    if (err < 0) {
+        err = snd_pcm_recover(alsa_handle, err, 1);
+        warn("Audio underrun playing %i samples");
+    }
     if (err < 0)
         die("Failed to write to PCM device: %s\n", snd_strerror(err));
 }
