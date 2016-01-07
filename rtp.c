@@ -41,7 +41,9 @@
 #include <mach/clock.h>
 #endif
 
-#define NTPCACHESIZE 7
+#define NTPCACHESIZE 12
+#define NTPRANGE     2000LL
+#define NTPSKIPLIMIT 20
 
 // only one RTP session can be active at a time.
 static int running = 0;
@@ -56,6 +58,7 @@ static pthread_t rtp_thread;
 static pthread_t ntp_receive_thread;
 static pthread_t ntp_send_thread;
 long long ntp_cache[NTPCACHESIZE + 1];
+static int ntp_cache_skip_count;
 static int strict_rtp;
 
 void rtp_record(int rtp_mode){
@@ -90,6 +93,7 @@ static void reset_ntp_cache() {
         ntp_cache[i] = LLONG_MIN;
     }
     ntp_cache[NTPCACHESIZE] = 0;
+    ntp_cache_skip_count = 0;
 }
 
 long long get_ntp_offset() {
@@ -101,6 +105,23 @@ static void update_ntp_cache(long long offset, long long arrival_time) {
 
     int i, d, minindex, maxindex;
     long long total;
+    long long old_avg = ntp_cache [NTPCACHESIZE];
+    long long offset_range = offset - old_avg;;
+
+    // NTP offset derived using the timing protocol, is subject to
+    // error if the out & return delays are not even.
+    // The averaging/max/min process will smooth but not remove the error
+    // We must therefore ignore outlying variants using the defined range (NTPRANGE)
+
+    if (ntp_cache_skip_count == NTPSKIPLIMIT) {				// if we have skipped too many
+	warn("ntp: time sync lost, being reset...");			// reset the cache & start again
+	reset_ntp_cache();
+    }
+
+    if ((ntp_cache[0] == LLONG_MIN) ||					// if initial filling of cache
+       ((offset_range < NTPRANGE) && (offset_range > -(NTPRANGE)))) {	// or validated within range
+    ntp_cache_skip_count = 0;						// process & reset skip count
+
 
     for (i = 0; i < (NTPCACHESIZE - 1);  i++) {
         ntp_cache[i] = ntp_cache[i+1];
@@ -130,7 +151,12 @@ static void update_ntp_cache(long long offset, long long arrival_time) {
         }
     }
     ntp_cache[NTPCACHESIZE] = total / d;
-    debug(2, "ntp: offset: %lld, d: %d\n", ntp_cache[NTPCACHESIZE], d);
+    debug(2, "ntp: offset: %lld +-(%5lld), d: %d\n", ntp_cache[NTPCACHESIZE], ntp_cache[NTPCACHESIZE]-old_avg, d);
+
+    } else {								// NTP offset is not within acceptable range
+	ntp_cache_skip_count++;
+	debug(1, "ntp: clock offset out of range: %6lld skipped (%i)\n", offset_range, ntp_cache_skip_count);
+    }
 }
 
 static long long tspk_to_us(struct timespec tspk) {
