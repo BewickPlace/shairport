@@ -425,7 +425,7 @@ static int stuff_buffer(short *inptr, short *outptr, long *sync_info, long *sync
 
     // maintain tuning statistics for the rate matching algorithm
     if (tuning_samples >= 1000000L) {
-       debug(0, "playback: stuffs:%3ld ppm, sample err max/min:%3ld:%4ld, fill %d\n", tuning_stuffs, max_sync_delay, min_sync_delay, seq_diff(ab_read, ab_write));
+       debug(1, "fill: %3i, stuffs: %3ld ppm, sample err max/min:%3ld:%4ld\n", seq_diff(ab_read, ab_write), tuning_stuffs, max_sync_delay, min_sync_delay);
 
        tuning_samples = 0L;
        tuning_stuffs = 0L;
@@ -622,7 +622,7 @@ static void *player_thread_func(void *arg) {
                 sync_time = get_sync_time(sync_tag.ntp_tsp);
                 sync_frames = us_to_frames(sync_time);
                 sync_frames_diff = ((ALPHA * sync_frames_diff) + ((10 - ALPHA) * sync_frames))/10;
-                debug(2, "sync: fill:%i, sync (time):%5lld (samples):%5d:%5d, previous stuffs %d\n", seq_diff(ab_read, ab_write), sync_time, sync_frames, sync_frames_diff, stuff_count);
+                debug(2, "fill: %i, sync:%5lld (samples):%4d:%4d, stuffs %d\n", seq_diff(ab_read, ab_write), sync_time, sync_frames, sync_frames_diff, stuff_count);
                 stuff_count = 0;
                 if (((sync_frames/frame_size) > 5) && (rtp_strictmode())) { // If we are in Strict mode and find ourselves playing ahead of sync (often caused by underrun on source)
 									// we need to inject some silence to realign before playing this frame - warn if serious
