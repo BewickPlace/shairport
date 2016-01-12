@@ -125,8 +125,8 @@ static void ab_reset(seq_t from, seq_t to) {
     abuf_t *abuf = 0;
 
     while (seq_diff(from, to)) {
-        if (seq_diff(from, to) >= BUFFER_FRAMES) {
-           from =  from + BUFFER_FRAMES;
+        if (seq_diff(from, to) > BUFFER_FRAMES) {
+	   from = to - BUFFER_FRAMES;
         } else {
            abuf = audio_buffer + BUFIDX(from);
            abuf->ready = 0;
@@ -363,7 +363,7 @@ static short *buffer_get_frame(sync_cfg *sync_tag) {
         pthread_mutex_unlock(&ab_mutex);
         return 0;
     }
-    if (buf_fill >= BUFFER_FRAMES) {   // overrunning! uh-oh. restart at a sane distance
+    if (buf_fill > BUFFER_FRAMES) {   // overrunning! uh-oh. restart at a sane distance
         warn("overrun %i (%04X:%04X)", buf_fill, ab_read, ab_write);
         ab_read = ab_write - (BUFFER_FRAMES/2);
 	ab_reset((ab_write - BUFFER_FRAMES), ab_read);	// reset any ready frames in those we've skipped (avoiding wrap around)
