@@ -55,6 +55,7 @@ static unsigned char *aesiv;
 static AES_KEY aes;
 static int sampling_rate, frame_size;
 static int ntp_sync_rate;
+static long long ltsp;
 
 #define FRAME_BYTES(frame_size) (4*frame_size)
 // maximal resampling shift - conservative
@@ -226,6 +227,10 @@ static void free_buffer(void) {
 
 static long us_to_frames(long long us) {
     return us * sampling_rate / 1000000;
+}
+
+static long long frames_to_us(long frames) {
+    return (long long) frames * 1000000LL / (long long) sampling_rate;
 }
 
 static inline long long get_sync_time(long long ntp_tsp) {
@@ -590,6 +595,8 @@ static void *player_thread_func(void *arg) {
                 play_samples = stuff_buffer(inbuf, outbuf, &sync_frames, &sync_frames_diff, &stuff_count);
                 stuff_count = 0;
                 state = PLAYING;
+		ntp_sync_count = 0;
+		ltsp = sync_tag.ntp_tsp;
                 debug(1,"Changing player STATE: %d\n", state);
             }
             break;
@@ -618,7 +625,18 @@ static void *player_thread_func(void *arg) {
             if (sync_tag.sync_mode == NTPSYNC) {
                 ntp_sync_rate = ntp_sync_count;				// Establish the number of frames between NTP Syncs
                 ntp_sync_count = 0;
-                //check if we're still in sync.
+
+		// Need to validate ntp timestamp, as weak sources
+		// this is not stable and impacts time sync
+		int tsp_sync_rate = us_to_frames(sync_tag.ntp_tsp-ltsp) / frame_size;
+		if (abs(tsp_sync_rate - ntp_sync_rate) > 2 ) {
+		    long long tsp_adjust = frames_to_us(ntp_sync_rate * frame_size);
+		    sync_tag.ntp_tsp = ltsp + tsp_adjust;
+		    debug(1, "Correct ntp tsp using: %lld %i:%i\n", tsp_adjust, tsp_sync_rate, ntp_sync_rate);
+		}
+		ltsp = sync_tag.ntp_tsp;
+
+               //check if we're still in sync.
                 sync_time = get_sync_time(sync_tag.ntp_tsp);
                 sync_frames = us_to_frames(sync_time);
                 sync_frames_diff = ((ALPHA * sync_frames_diff) + ((10 - ALPHA) * sync_frames))/10;
