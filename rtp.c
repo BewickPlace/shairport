@@ -221,7 +221,9 @@ static void *rtp_receiver(void *arg) {
             // check if extension bit is set; this will be the case for the first sync
             sync_tag.sync_mode = ((packet[0] & 0x10) ? E_NTPSYNC : NTPSYNC);
             sync_fresh = 1;
+	    if (sync_tag.sync_mode == E_NTPSYNC) {
             player_set_latency(sync_tag.rtp_tsp - tsp_less_latency);		// Set audio latency according to details in packet
+	    }
             continue;
         }
         if (type == 0x60 || type == 0x56) {   // audio data / resend
