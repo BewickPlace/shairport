@@ -455,6 +455,7 @@ static void handle_flush(rtsp_conn_info *conn,
 static void handle_setup(rtsp_conn_info *conn,
                          rtsp_message *req, rtsp_message *resp) {
     int cport, tport;
+
     char *hdr = msg_get_header(req, "Transport");
     if (!hdr)
         return;
@@ -472,10 +473,25 @@ static void handle_setup(rtsp_conn_info *conn,
     p = strchr(p, '=') + 1;
     tport = atoi(p);
 
+    char *hdr2 = msg_get_header(req, "User-Agent");
+    if (!hdr2)
+        return;
+
+    char *name = hdr2;				// In the User-Agent header
+    int version = 0;
+    p = strchr(hdr2, '/');			// Extract name and version number
+    if (!p)
+        return;
+    *p = '\0';
+    p = p+1;
+    version = atoi(p);
+
     if (rtsp_take_available_player()) {					// Only take  player if available (not playing)
     int sport = rtp_setup(&conn->remote, &cport, &tport);
     if (!sport)
         return;
+
+    player_set_device_type( name, version);	// set the device type
 
     digitalWrite(11, 0);	/* On Set-up:	Turn Amplifier ON - disable sleep */
     player_play(&conn->stream);

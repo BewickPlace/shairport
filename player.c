@@ -57,6 +57,26 @@ static int sampling_rate, frame_size;
 static int ntp_sync_rate;
 static long long ltsp;
 
+// Table of compaitble device types and associated charecteristics
+
+typedef struct {
+    char *name;			// User-Agent name in RECORD statement
+    int  version;		// Min version supported, higher versions must appear first in list
+    int  clean_start;		// First audio packet sent is as identified in RTP-Info statement
+    int  fast_start;		// First audio timestamp does NOT require adjustment
+} device_type;
+
+#define NDEVICES        6
+static device_type devices[NDEVICES] = {
+        { "Airplay",      0,  1, 0},			// iPad, iPhone
+        { "forked-daapd", 0,  1, 1},			// forked daapd
+        { "iTunes",       12, 1, 0},			// iTunes
+        { "iTunes",       10, 1, 1},			// Air Audio
+        { "iTunes",       0,  0, 1},			// Airfoil
+        { "Unident",      0,  1, 1} };
+
+static device_type *user_agent;
+
 #define FRAME_BYTES(frame_size) (4*frame_size)
 // maximal resampling shift - conservative
 #define OUTFRAME_BYTES(frame_size) (4*(frame_size+3))
@@ -239,6 +259,20 @@ static inline long long get_sync_time(long long ntp_tsp) {
     return sync_time_est;
 }
 
+void player_set_device_type(char *name, int version) {
+    int i;
+    for (i=0; i<NDEVICES; i++) {
+        if ((!strcasecmp(name, devices[i].name)) &&     // check for name matcch
+            (version >= devices[i].version)) {          // and version same or higher
+            user_agent = &devices[i];                   // set matching User Agent
+	    break;
+        }
+    }
+    user_agent = &devices[i];                   // or default to Unident (last in list)
+    debug(1, "set device type %s v%i from %s v%i\n", user_agent->name, user_agent->version, name, version);
+    return;
+}
+
 void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
     abuf_t *abuf = 0;
     int16_t buf_fill;
@@ -294,7 +328,8 @@ void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
         abuf->sync.rtp_tsp = sync_tag.rtp_tsp;
         // sync packets with extension bit seem to be one audio packet off:
         // if the extension bit was set, pull back the ntp time by one packet's time
-        if (sync_tag.sync_mode == E_NTPSYNC) {
+	// Some devices have addressed this and are listed as fast_start
+        if ((sync_tag.sync_mode == E_NTPSYNC) && (!user_agent->fast_start)) {
             abuf->sync.ntp_tsp = sync_tag.ntp_tsp - (long long)frame_size * 1000000LL / (long long)sampling_rate;
             abuf->sync.sync_mode = NTPSYNC;
         } else {
@@ -699,7 +734,8 @@ unsigned long player_flush(int seqno, unsigned long rtp_tsp) {
     ab_read = seqno;
     // a negative seqno mean the client did not supply one, so we will
     // treat the first audio packet that comes along, as the first in the audio stream
-    ab_synced = (seqno < 0 ? SIGNALLOSS : UNSYNC);
+    // Also use this when User-Agent dies not support clean start.
+    ab_synced = ((seqno < 0) || !(user_agent->clean_start) ? SIGNALLOSS : UNSYNC);
     pthread_mutex_unlock(&ab_mutex);
     return result;
 }

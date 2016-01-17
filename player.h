@@ -35,6 +35,7 @@ void player_volume(double f);
 unsigned long player_flush(int seqno, unsigned long rtp_tsp);
 void player_resync(void);
 void player_set_latency(long latency_samples);
+void player_set_device_type(char *name, int version);
 
 void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len);
 
