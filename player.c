@@ -610,7 +610,7 @@ static void *player_thread_func(void *arg) {
         }
         case SYNCING: {
             if (sync_frames > 0) {
-                if (((sync_frames < frame_size * 50) && (sync_frames >= frame_size * 49)) && \
+                if (((sync_frames < frame_size * 10) && (sync_frames >= frame_size * 9)) && \
                         (sync_tag.sync_mode != NOSYNC)) {
                     debug(3,"sync_frames adjusting: %d->", sync_frames);
                     // figure out how much silence to insert before playback starts
@@ -664,8 +664,10 @@ static void *player_thread_func(void *arg) {
 		// Need to validate ntp timestamp, as weak sources
 		// this is not stable and impacts time sync
 		int tsp_sync_rate = us_to_frames(sync_tag.ntp_tsp-ltsp) / frame_size;
-		if (abs(tsp_sync_rate - ntp_sync_rate) > 2 ) {
-		    long long tsp_adjust = frames_to_us(ntp_sync_rate * frame_size);
+		int tsp_sync_diff = tsp_sync_rate - ntp_sync_rate;
+		debug(3, "NTP sync rate %i : %i\n", tsp_sync_rate, ntp_sync_rate);
+		if (abs(tsp_sync_diff) > 2 ) {
+		    long long tsp_adjust = frames_to_us((ntp_sync_rate + (tsp_sync_diff/abs(tsp_sync_diff))) * frame_size);
 		    sync_tag.ntp_tsp = ltsp + tsp_adjust;
 		    debug(1, "Correct ntp tsp using: %lld %i:%i\n", tsp_adjust, tsp_sync_rate, ntp_sync_rate);
 		}
