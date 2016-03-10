@@ -663,13 +663,16 @@ static void *player_thread_func(void *arg) {
 
 		// Need to validate ntp timestamp, as weak sources
 		// this is not stable and impacts time sync
-		int tsp_sync_rate = us_to_frames(sync_tag.ntp_tsp-ltsp) / frame_size;
-		int tsp_sync_diff = tsp_sync_rate - ntp_sync_rate;
-		debug(3, "NTP sync rate %i : %i\n", tsp_sync_rate, ntp_sync_rate);
-		if (abs(tsp_sync_diff) > 2 ) {
-		    long long tsp_adjust = frames_to_us((ntp_sync_rate + (tsp_sync_diff/abs(tsp_sync_diff))) * frame_size);
-		    sync_tag.ntp_tsp = ltsp + tsp_adjust;
-		    debug(1, "Correct ntp tsp using: %lld %i:%i\n", tsp_adjust, tsp_sync_rate, ntp_sync_rate);
+		long long tsp_adjust = frames_to_us(ntp_sync_rate * frame_size);	// Expected tsp gap based on packets processed
+		long long sync_tsp = ltsp + tsp_adjust;					// Expected new tsp
+		long long tsp_sync_diff = sync_tsp - sync_tag.ntp_tsp;			// Gap between expected and received
+
+                debug(3, "NTP sync rate error %lld\n", tsp_sync_diff);
+
+		if ((llabs(tsp_sync_diff) >   800LL ) &&				// If received tsp looks unstable
+		    (llabs(tsp_sync_diff) < 20000LL )) {				// but allow small variations and cap protection for full resync
+		    sync_tag.ntp_tsp = sync_tsp;					// Use expected tsp to maintain stability in playback
+		    debug(3, "Override ntp timestamp, error:%lldus\n", tsp_sync_diff);
 		}
 		ltsp = sync_tag.ntp_tsp;
 
