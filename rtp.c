@@ -40,6 +40,7 @@
 #include <mach/mach.h>
 #include <mach/clock.h>
 #endif
+#include "rtsp.h"
 
 #define NTPCACHESIZE 12
 #define NTPRANGE     5000LL
@@ -344,6 +345,7 @@ static void *ntp_sender(void *arg) {
         if (cc < 0){
             // Warn if network error - then exit loop and wait for host to reset
             warn("send packet failed in send_timing_packet - network error? (%d)", errno);
+	    rtsp_warn_shutdown();
             break;
         }
         debug(2, "Current time s:%lu us:%lu\n", (unsigned int) tv.tv_sec, (unsigned int) tv.tv_nsec / 1000);

@@ -67,6 +67,11 @@ typedef struct {
     pthread_t thread;
 } rtsp_conn_info;
 
+void rtsp_warn_shutdown() {			// Warn main RTSP playing thread of issue in another thread
+    please_shutdown = 1;			// used on network failure to get ordered shutdown
+    pthread_kill(playing_thread, SIGUSR1);
+}
+
 // determine if we are the currently playing thread
 static inline int rtsp_playing(void) {
     if (pthread_mutex_trylock(&playing_mutex)) {
