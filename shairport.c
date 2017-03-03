@@ -46,6 +46,7 @@ void shairport_shutdown(int retval) {
     if (shutting_down)
         return;
     shutting_down = 1;
+    warn("Shutting down...");		// Log so we get timestamp
     printf("Shutting down...\n");
     mdns_unregister();
     rtsp_shutdown_stream();
