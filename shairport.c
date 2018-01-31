@@ -91,6 +91,7 @@ void usage(char *progname) {
     printf("    -k, --password=PW   require password to stream audio\n");
     printf("    -t, --delay=TIME    set by how much audio is delayed.\n");
     printf("                        This value is in ms; default %d\n", config.delay/1000);
+    printf("    -g, --gpio          Enable GPIO sleep signal on GPIO physical pin 11\n");
     printf("    -d, --daemon        fork (daemonise). The PID of the child process is\n");
     printf("                        written to stdout, unless a pidfile is used.\n");
     printf("    -P, --pidfile=FILE  write daemon's pid to FILE on startup.\n");
@@ -130,6 +131,7 @@ int parse_options(int argc, char **argv) {
     static struct option long_options[] = {
         {"help",    no_argument,        NULL, 'h'},
         {"daemon",  no_argument,        NULL, 'd'},
+        {"gpio",    no_argument,        NULL, 'g'},
         {"pidfile", required_argument,  NULL, 'P'},
         {"log",     required_argument,  NULL, 'l'},
         {"delay",   required_argument,  NULL, 't'},
@@ -148,7 +150,7 @@ int parse_options(int argc, char **argv) {
 
     int opt;
     while ((opt = getopt_long(argc, argv,
-                              "+hdvP:l:e:p:a:k:o:t:B:E:wm:r:",
+                              "+hdvgP:l:e:p:a:k:o:t:B:E:wm:r:",
                               long_options, NULL)) > 0) {
         switch (opt) {
             default:
@@ -160,6 +162,9 @@ int parse_options(int argc, char **argv) {
                 break;
             case 'v':
                 debuglev++;
+                break;
+            case 'g':
+                config.gpio = 1;
                 break;
             case 'p':
                 config.port = atoi(optarg);

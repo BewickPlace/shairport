@@ -28,6 +28,7 @@ typedef struct {
     mdns_backend *mdns;
     int delay;
     int latency;
+    int gpio;
     int daemonise;
     char *cmd_start, *cmd_stop;
     int cmd_blocking;
