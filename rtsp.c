@@ -950,15 +950,17 @@ void rtsp_listen_loop(void) {
             maxfd = sockfd[i];
     }
 
+    mdns_register();
+
+    printf("Listening for connections.\n");
+
     if (config.gpio) {
+    warn("GPIO Amplifier Sleep Mode ENABLED");
     wiringPiSetupPhys();	/* Listen Loop: Initilise the GPIO access - use physical pin numbers */
     pinMode(11, OUTPUT);	/* let's use Pin 11 */
     digitalWrite(11, 1);	/* turn Amplifier Sleep mode ON */
     }
 
-    mdns_register();
-
-    printf("Listening for connections.\n");
     shairport_startup_complete();
 
     int acceptfd;
