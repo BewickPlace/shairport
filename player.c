@@ -178,7 +178,8 @@ static void alac_decode(short *dest, uint8_t *buf, int len) {
 
     alac_decode_frame(decoder_info, packet, dest, &outsize);
 
-    assert(outsize == FRAME_BYTES(frame_size));
+    if (outsize != FRAME_BYTES(frame_size)) {warn("Incorrect frame size %d:%d", outsize, FRAME_BYTES(frame_size)); }
+//    assert(outsize == FRAME_BYTES(frame_size));
 }
 
 
