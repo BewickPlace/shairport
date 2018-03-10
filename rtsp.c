@@ -414,7 +414,7 @@ static void handle_teardown(rtsp_conn_info *conn,
                             rtsp_message *req, rtsp_message *resp) {
     if (!rtsp_playing())
         return;
-    digitalWrite(11, 1);	/* On TearDown:	Turn Ampliefier OFF - enable sleep */
+    if (config.gpio) digitalWrite(11, 1);	/* On TearDown:	Turn Ampliefier OFF - enable sleep */
     resp->respcode = 200;
     msg_add_header(resp, "Connection", "close");
     please_shutdown = 1;
@@ -498,7 +498,7 @@ static void handle_setup(rtsp_conn_info *conn,
 
     player_set_device_type( name, version);	// set the device type
 
-    digitalWrite(11, 0);	/* On Set-up:	Turn Amplifier ON - disable sleep */
+    if (config.gpio) digitalWrite(11, 0);	/* On Set-up:	Turn Amplifier ON - disable sleep */
     player_play(&conn->stream);
 
     char *resphdr = malloc(120);
@@ -950,9 +950,11 @@ void rtsp_listen_loop(void) {
             maxfd = sockfd[i];
     }
 
+    if (config.gpio) {
     wiringPiSetupPhys();	/* Listen Loop: Initilise the GPIO access - use physical pin numbers */
     pinMode(11, OUTPUT);	/* let's use Pin 11 */
     digitalWrite(11, 1);	/* turn Amplifier Sleep mode ON */
+    }
 
     mdns_register();
 
