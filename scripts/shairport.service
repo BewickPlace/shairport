@@ -7,7 +7,7 @@ After=avahi-daemon.service
 
 [Service]
 EnvironmentFile=/etc/shairport.conf
-ExecStart=/usr/local/bin/shairport --name $NAME  -t $DELAY -r $QSOXR $GPIO $DEBUG --log $LOGFILE
+ExecStart=/usr/local/bin/shairport --name ${NAME}  -t $DELAY -r $QSOXR $GPIO $DEBUG --log $LOGFILE
 User=root
 Group=root
 
