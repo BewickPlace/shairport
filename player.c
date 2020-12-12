@@ -280,7 +280,7 @@ void player_put_packet(seq_t seqno, sync_cfg sync_tag, uint8_t *data, int len) {
 
     pthread_mutex_lock(&ab_mutex);
     if (ab_synced == SIGNALLOSS) {
-        debug(2, "picking up first seqno %04X\n", seqno);
+        warn("Underrun @ (%04X:%04X) Resyncing from %04X", ab_read, ab_write, seqno);
         ab_write = seqno;
         ab_read = seqno;
         ab_synced = UNSYNC;
@@ -399,7 +399,9 @@ static short *buffer_get_frame(sync_cfg *sync_tag) {
 
     buf_fill = seq_diff(ab_read, ab_write);
     if (buf_fill < 1) {
-        warn("underrun %i (%04X:%04X)", buf_fill, ab_read, ab_write);
+	// Buffer empty can be caused by end of track or underrun
+	// Prepare for resync and only report Underrun when new packet received
+        debug(2, "Buffer empty (%04X:%04X)\n", ab_read, ab_write);
 	ab_resync();
         pthread_mutex_unlock(&ab_mutex);
         return 0;
